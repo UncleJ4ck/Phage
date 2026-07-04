@@ -1422,6 +1422,37 @@ class TestHttpVerbTechnique(unittest.TestCase):
         self.assertEqual(reqs[1].path, b"/smuggled")
 
 
+class TestProxyOracle(unittest.TestCase):
+    def test_inject_close_adds_connection_close_after_request_line(self):
+        from phage.evo.proxy import _inject_close
+
+        raw = b"POST / HTTP/1.1\r\nhost: lab\r\ncontent-length: 4\r\n\r\nAAAA"
+        out = _inject_close(raw)
+        # connection: close is the first header, right after the request line
+        self.assertEqual(
+            out,
+            b"POST / HTTP/1.1\r\nconnection: close\r\nhost: lab\r\ncontent-length: 4\r\n\r\nAAAA",
+        )
+
+    def test_inject_close_noop_without_crlf(self):
+        from phage.evo.proxy import _inject_close
+
+        self.assertEqual(_inject_close(b"garbage"), b"garbage")
+
+    def test_read_backend_count_sums_jsonl(self):
+        import os
+        import tempfile
+
+        from phage.evo.proxy import _read_backend_count
+
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "b.jsonl")
+            with open(p, "w") as f:
+                f.write('{"n": 1}\n{"n": 2}\n')
+            self.assertEqual(_read_backend_count(p), 3)
+            self.assertEqual(_read_backend_count("/no/such.jsonl"), 0)
+
+
 class TestReviewFindingsRegression(unittest.TestCase):
     """Regressions for three bugs an adversarial review found and I reproduced."""
 
