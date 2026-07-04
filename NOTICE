@@ -1,6 +1,10 @@
 Copyright (c) 2025 CyberArk Software Ltd. All rights reserved
 
-QuicDraw is using the following open source components:
+Phage is a fork of CyberArk's QuicDrawH3 (https://github.com/cyberark/QuicDrawH3),
+extended by j4kuuu with the phage.evo evolutionary engine. The original work
+remains under the copyright above and the Apache-2.0 license.
+
+Phage is using the following open source components:
 
 1) aioquic (https://github.com/aiortc/aioquic) : BSD-3-Clause License
         Copyright (c) Jeremy Lainé.

@@ -1,5 +1,9 @@
-# Security Policies and Procedures
+# Security Policy
 
-CyberArk takes product security very seriously. If you believe you have found a vulnerability in one of our products, we ask that you follow responsible disclosure guidelines and contact product_security@cyberark.com and work with us toward a quick resolution to protect our customers.
+Phage is a research tool for **authorized testing only**. Do not run it against
+systems you do not have explicit permission to test. The evolutionary engine is
+localhost-scoped by a guardrail (`phage.evo.safety`).
 
-Refer to [CyberArk's Security Vulnerability Policy](https://www.cyberark.com/cyberark-security-vulinerability-policy.pdf) for more details.
+If you find a vulnerability in Phage itself, please open a private security
+advisory at https://github.com/j4kuuu/phage/security/advisories or a GitHub
+issue at https://github.com/j4kuuu/phage/issues.

@@ -1,14 +1,14 @@
-# QuicDrawUI is a UI for QuicDraw(H3)
-# QuicDraw is a client for fuzzing and racing HTTP/3 servers.
+# PhageUI is a UI for Phage(H3)
+# Phage is a client for fuzzing and racing HTTP/3 servers.
 # It can send GET and POST requests.
 # It is designed to be used with and based on the aioquic(https://github.com/aiortc/aioquic) library.
-# GitHub: https://github.com/cyberark/quicdrawh3
+# GitHub: https://github.com/j4kuuu/phage
 # License: Apache-2.0 License
-# Author: Maor Abutbul <CyberArk Labs>
+# Fork of CyberArk QuicDrawH3, original author Maor Abutbul <CyberArk Labs>
 
 # Version and description
 __version__ = "0.9.0"
-__description__ = "QuicDraw-UI: HTTP/3 Request Editor - A GUI for QuicDraw(H3): HTTP/3 Fuzzing and Racing (Client)"
+__description__ = "Phage-UI: HTTP/3 Request Editor - A GUI for Phage(H3): HTTP/3 Fuzzing and Racing (Client)"
 
 import argparse
 import subprocess
@@ -38,13 +38,13 @@ from PySide6.QtWidgets import (
 def ui_main() -> None:
     app = QApplication(sys.argv)
     cli_params = parse_command_line_arguments()
-    ui_window = QuicDrawUI(cli_params)
+    ui_window = PhageUI(cli_params)
     ui_window.show()
     sys.exit(app.exec())
 
 
-class QuicDrawWorker(QThread):
-    """Worker thread for running QuicDraw commands"""
+class PhageWorker(QThread):
+    """Worker thread for running Phage commands"""
 
     output_signal = Signal(str)
     error_signal = Signal(str)
@@ -113,14 +113,14 @@ def escapeStringBash(source_str: str) -> str:
     return "".join(out)
 
 
-class QuicDrawUI(QMainWindow):
+class PhageUI(QMainWindow):
     def __init__(self, params_dict=None):
         super().__init__()
         self.worker = None
         self.init_ui(params_dict=params_dict)
 
     def init_ui(self, params_dict=None):
-        self.setWindowTitle("QuicDrawH3 - HTTP/3 Fuzzing & Racing Tool")
+        self.setWindowTitle("PhageH3 - HTTP/3 Fuzzing & Racing Tool")
         self.setGeometry(100, 100, 1200, 800)
         self.setWindowIcon(QIcon(":icons/qd_icon.ico"))
 
@@ -184,7 +184,7 @@ class QuicDrawUI(QMainWindow):
         url_group = QGroupBox("Target URL")
         url_layout = QVBoxLayout()
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://cyberark.com/path")
+        self.url_input.setPlaceholderText("https://example.com/path")
         url_layout.addWidget(self.url_input)
         url_group.setLayout(url_layout)
         layout.addWidget(url_group)
@@ -241,7 +241,7 @@ class QuicDrawUI(QMainWindow):
 
         # Run Button
         button_layout = QHBoxLayout()
-        self.send_btn = QPushButton("Run QuicDraw")
+        self.send_btn = QPushButton("Run Phage")
         self.send_btn.setIcon(QIcon(":icons/qd_icon.ico"))
         self.send_btn.setIconSize(QSize(24, 24))
         self.send_btn.clicked.connect(self.do_send_request)
@@ -288,7 +288,7 @@ class QuicDrawUI(QMainWindow):
         self.update_preview_btn = QPushButton("Update Preview")
         self.update_preview_btn.clicked.connect(self.do_update_preview)
         # Run Button
-        self.send_btn = QPushButton("Run QuicDraw")
+        self.send_btn = QPushButton("Run Phage")
         self.send_btn.setIcon(QIcon(":icons/qd_icon.ico"))
         self.send_btn.clicked.connect(self.do_send_request)
         buttons_advanced_layout.addRow(self.update_preview_btn, self.send_btn)
@@ -378,7 +378,7 @@ class QuicDrawUI(QMainWindow):
         vebose=False,
         bash_escape=False,
     ):
-        cmd = f"quicdraw {url}"
+        cmd = f"phage {url}"
         if secrets_log:
             cmd += f' -l "{secrets_log}"'
         if headers:
@@ -406,7 +406,7 @@ class QuicDrawUI(QMainWindow):
         self.output_text.append(f"Executing: {cmd}\n" + "=" * 60 + "\n")
         self.status_label.setText("Running...")
 
-        self.worker = QuicDrawWorker(cmd)
+        self.worker = PhageWorker(cmd)
         self.worker.output_signal.connect(self.append_output)
         self.worker.error_signal.connect(self.append_error)
         self.worker.finished_signal.connect(self.on_command_finished)
@@ -428,21 +428,10 @@ logo = rf"""
     -----------
     {__description__}
     -----------
-               _         _
-              (_)       | |                            __  ______
-    __ _ _   _ _  ___ __| |_ __ __ ___      __        / / / /  _/
-   / _` | | | | |/ __/ _` | '__/ _` \ \ /\ / / _____ / / / // /
-  | (_| | |_| | | (_| (_| | | | (_| |\ V  V / /____// /_/ // /
-   \__, |\__,_|_|\___\__,_|_|  \__,_| \_/\_/        \____/___/
-      |_|    _______
-         \  |QFS____| -------------------- HTTP/3
-          \ |_//
-            |_|
-
-    GitHub: https://github.com/cyberark/QuicDrawH3/QuicDraw-UI
+    GitHub: https://github.com/j4kuuu/phage
     License: Apache-2.0 License
-    Author: Maor Abutbul <CyberArk Labs>
-    QuicDraw-UI Version: {__version__}
+    Fork of CyberArk QuicDrawH3, original author Maor Abutbul <CyberArk Labs>
+    Phage-UI Version: {__version__}
     -----------
 """
 
@@ -552,7 +541,7 @@ if __name__ == "__main__":
     try:
         ui_main()
     except KeyboardInterrupt:
-        print("\nQuicDraw interrupted by user.")
+        print("\nPhage interrupted by user.")
     except Exception as e:
         print(
             "An error occurred: {0} : {1}".format(

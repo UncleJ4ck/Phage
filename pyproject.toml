@@ -4,6 +4,7 @@ requires = ["setuptools >= 77.0.3"]
 
 [project]
 authors = [{name = "Maor A", email = "m2a2@users.noreply.github.com"}]
+maintainers = [{name = "j4kuuu"}]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
@@ -16,12 +17,12 @@ dependencies = [
   "aioquic",
   "wsproto"
 ]
-description = "QuicDraw(H3) Fuzzing and Racing HTTP/3 (over QUIC)"
+description = "Phage(H3) Fuzzing and Racing HTTP/3 (over QUIC)"
 dynamic = ["version"]  # Use dynamic versioning
 keywords = ["HTTP/3", "QUIC", "Web", "Security", "Fuzzing", "Fuzz", "Race-Conditions", "Web Security", "Web Application Security", "HTTP3"]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-name = "quicdraw"
+name = "phage"
 readme = "README.md"
 requires-python = ">=3.9"
 
@@ -29,15 +30,16 @@ requires-python = ">=3.9"
 ui = ["pyside6"]
 
 [project.scripts]
-quicdraw = "quicdraw.quicdraw:cli_main"
-quicdraw-ui = "quicdraw.ui.ui:ui_main"
+phage = "phage.phage:cli_main"
+phage-ui = "phage.ui.ui:ui_main"
+phage-evo = "phage.evo.runner:main"
 
 [project.urls]
-Homepage = "https://github.com/cyberark/QuicDrawh3"
-Issues = "https://github.com/cyberark/QuicDrawh3/issues"
+Homepage = "https://github.com/j4kuuu/phage"
+Issues = "https://github.com/j4kuuu/phage/issues"
 
 [tool.setuptools.dynamic]
-version = {attr = "quicdraw.quicdraw.__version__"}
+version = {attr = "phage.phage.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

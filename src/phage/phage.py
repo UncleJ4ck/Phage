@@ -1,13 +1,14 @@
-# QuicDraw is a client for fuzzing and racing HTTP/3 servers.
+# Phage is a client for fuzzing and racing HTTP/3 servers.
 # It can send GET and POST requests.
 # It is designed to be used with and based on the aioquic(https://github.com/aiortc/aioquic) library.
-# GitHub: https://github.com/cyberark/quicdrawh3
+# GitHub: https://github.com/j4kuuu/phage
 # License: Apache-2.0 License
-# Author: Maor Abutbul <CyberArk Labs>
+# This client began as CyberArk's QuicDrawH3 (github.com/cyberark/QuicDrawH3).
+# Original author: Maor Abutbul <CyberArk Labs>.
 
 # Version and description
 __version__ = "0.9.1"
-__description__ = "QuicDraw(H3): HTTP/3 Fuzzing and Racing (Client)"
+__description__ = "Phage(H3): HTTP/3 Fuzzing and Racing (Client)"
 
 import argparse
 import asyncio
@@ -43,7 +44,7 @@ try:
 except ImportError:
     uvloop = None
 
-logger = logging.getLogger("QuicDraw")
+logger = logging.getLogger("Phage")
 HttpConnection = Union[H0Connection, H3Connection]
 USER_AGENT = "aioquic/" + aioquic.__version__
 start_time = time.time()
@@ -706,20 +707,9 @@ logo = rf"""
     -----------
     {__description__}
     -----------
-               _         _
-              (_)       | |                          ______
-    __ _ _   _ _  ___ __| |_ __ __ ___      __  /\  /\___ /
-   / _` | | | | |/ __/ _` | '__/ _` \ \ /\ / / / /_/ / |_ \
-  | (_| | |_| | | (_| (_| | | | (_| |\ V  V / / __  / ___) |
-   \__, |\__,_|_|\___\__,_|_|  \__,_| \_/\_/  \/ /_/ |____/
-      |_|    _______
-         \  |QFS____| -------------------- HTTP/3
-          \ |_//
-            |_|
-
-    GitHub: https://github.com/cyberark/QuicDrawH3
+    GitHub: https://github.com/j4kuuu/phage
     License: Apache-2.0 License
-    Author: Maor Abutbul <CyberArk Labs>
+    Fork of CyberArk QuicDrawH3, original author Maor Abutbul <CyberArk Labs>
     Version: {__version__}
     -----------
 """
@@ -985,7 +975,7 @@ if __name__ == "__main__":
     try:
         cli_main()
     except KeyboardInterrupt:
-        print("\nQuicDraw interrupted by user.")
+        print("\nPhage interrupted by user.")
     except Exception as e:
         logger.error(
             "An error occurred: %s : %s",

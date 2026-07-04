@@ -1,37 +1,21 @@
-# QuicDraw (H3)
+# Phage
 
-```bash
-    -----------
-    QuicDraw(H3): HTTP/3 Fuzzing and Racing (Client)
-    -----------
-               _         _
-              (_)       | |                          ______
-    __ _ _   _ _  ___ __| |_ __ __ ___      __  /\  /\___ /
-   / _` | | | | |/ __/ _` | '__/ _` \ \ /\ / / / /_/ / |_ \
-  | (_| | |_| | | (_| (_| | | | (_| |\ V  V / / __  / ___) |
-   \__, |\__,_|_|\___\__,_|_|  \__,_| \_/\_/  \/ /_/ |____/
-      |_|    _______
-         \  |QFS____| -------------------- HTTP/3
-          \ |_//
-            |_|
+Phage is a security research tool for fuzzing and racing HTTP/3 (over QUIC)
+servers, and for evolving HTTP/3-to-HTTP/1 request-smuggling desync vectors. It
+implements the `Quic-Fin-Sync` race-condition primitive and layers an
+evolutionary search on top of it.
 
-    GitHub: https://github.com/cyberark/QuicDrawH3
-    License: Apache-2.0 License
-    Author: Maor Abutbul <CyberArk Labs>
-    -----------
-```
-
-QuicDraw is a security research tool designed for fuzzing and racing
-HTTP/3 servers. QuicDraw implements the `Quic-Fin-Sync` on HTTP/3 (over
-QUIC), for race-condition testing.
-
-The tool was originally published as part of CyberArk Labs' research:
-"[Racing and Fuzzing HTTP/3: Open-sourcing
-QuicDraw(H3)](https://www.cyberark.com/resources/threat-research-blog/racing-and-fuzzing-http-3-open-sourcing-quicdraw)"
+Phage began as CyberArk Labs'
+[QuicDrawH3](https://github.com/cyberark/QuicDrawH3) (the `Quic-Fin-Sync` racing
+client by Maor Abutbul), originally published in "[Racing and Fuzzing
+HTTP/3](https://www.cyberark.com/resources/threat-research-blog/racing-and-fuzzing-http-3-open-sourcing-quicdraw)".
+This fork adds `phage.evo`: a coverage-guided, quality-diverse evolutionary
+engine that searches the H3 framing space for desyncs, with biology- and
+physics-inspired search mechanisms. See [docs/EVO.md](docs/EVO.md).
 
 ## TOC
 
-- [QuicDraw](#quicdraw-h3)
+- [Phage](#phage)
   - [Main Features](#main-features)
   - [Quick Start](#quick-start)
     - [Install using pip](#install-using-pip)
@@ -50,9 +34,9 @@ QuicDraw(H3)](https://www.cyberark.com/resources/threat-research-blog/racing-and
     - [Fuzzing HTTP3 applications `-d` DATA `-w`
       WORDLIST](#fuzzing-http3-applications--d-data--w-wordlist)
       - [Fuzzing Example](#fuzzing-example)
-- [QuicDraw-UI](#quicdraw-ui)
-  - [Install quicdraw-ui using pip
-    (PyPi)](#install-quicdraw-ui-using-pip-pypi)
+- [Phage-UI](#phage-ui)
+  - [Install phage-ui using pip
+    (PyPi)](#install-phage-ui-using-pip-pypi)
   - [Example 1: Simple HTTP/3
     Request](#example-1-simple-http3-request)
   - [Example 2: Fuzzing with a
@@ -90,38 +74,38 @@ Prerequisite:
 
 ## Install using pip
 
-The easiest way to install QuicDraw is to run:
+The easiest way to install Phage is to run:
 
 ```bash
-pip install quicdraw
+pip install phage
 ```
 
-### Install quicdraw-ui using pip (PyPi)
+### Install phage-ui using pip (PyPi)
 
-The easiest way to install QuicDraw-UI is to run:
+The easiest way to install Phage-UI is to run:
 
 ```bash
-pip install quicdraw[ui]
-quicdraw-ui -h
+pip install phage[ui]
+phage-ui -h
 ```
 
 ### Runninig (after pip install)
 
 ```bash
-quicdraw -h
+phage -h
 ```
 
 ### Build and install locally by cloning the source (optional)
 
-If there are no wheels for your system or if you wish to build QuicDraw
+If there are no wheels for your system or if you wish to build Phage
 from source.
 
 Clone the repository:
 
 ```bash
-git clone https://github.com/cyberark/quicdrawh3.git
+git clone https://github.com/j4kuuu/phage.git
 python3 -m build
-pip install .\dist\quicdraw-<VERSION>.tar.gz
+pip install .\dist\phage-<VERSION>.tar.gz
 ```
 
 Install module dependencies. (You may prefer to do this within a
@@ -135,7 +119,7 @@ Environment](https://packaging.python.org/guides/installing-using-pip-and-virtua
 ### Print Help
 
 ```bash
-quicdraw -h
+phage -h
 ```
 
 ### Normal HTTP/3 (over QUIC) Requests
@@ -143,7 +127,7 @@ quicdraw -h
 ### An HTTP/3 GET Request
 
 ```bash
-quicdraw <https://http3_server.com/path>
+phage <https://http3_server.com/path>
 ```
 
 ### An HTTP/3 POST Request
@@ -152,7 +136,7 @@ HTTP POST requests are determined by using the `-d` argument followed by
 the HTTP POST data to be sent.
 
 ```bash
-quicdraw <https://http3_server.com/path> -d '{"key":"value"}'
+phage <https://http3_server.com/path> -d '{"key":"value"}'
 ```
 
 ### Log TLS Secrets to file `-l SECRETS_LOG`
@@ -184,24 +168,24 @@ Note: If a WORDLIST (`-w`) argument is specified, this argument
 #### Repeat the same request 12 times (`-tr 12`) (using `Quic-Fin-Sync`)
 
 ```bash
-quicdraw <https://http3_server.com/path> -d '{"key":"value"}' -H 'Authorization: bearer eyJ...' -tr 12
+phage <https://http3_server.com/path> -d '{"key":"value"}' -H 'Authorization: bearer eyJ...' -tr 12
 ```
 
 #### Repeat the same request 12 times (`-tr 12`), use `Quic-Fin-Sync` and log (`-l`) TLS secrets
 
 ```bash
-quicdraw <https://http3_server.com/path> -d '{"key":"value"}' -H 'Authorization: bearer eyJ...' -H 'content-type: application/json' -l /m2a/ssl_key_log_file.log -tr 12
+phage <https://http3_server.com/path> -d '{"key":"value"}' -H 'Authorization: bearer eyJ...' -H 'content-type: application/json' -l /m2a/ssl_key_log_file.log -tr 12
 ```
 
 #### Repeat the same request 12 times (`-tr 12`), use `Quic-Fin-Sync`, log (`-l`) TLS secrets, and print verbose (`-v`) output including HTTP response content
 
 ```bash
-quicdraw <https://http3_server.com/path> -d '{"key": "value"}' -H 'Authorization: bearer eyJ...' -H 'content-type: application/json' -l /m2a/ssl_key_log_file.log -tr 12 -v
+phage <https://http3_server.com/path> -d '{"key": "value"}' -H 'Authorization: bearer eyJ...' -H 'content-type: application/json' -l /m2a/ssl_key_log_file.log -tr 12 -v
 ```
 
 ### Fuzzing HTTP3 applications `-d` DATA `-w` WORDLIST
 
-Fuzzing in QuicDraw is based on a simple concept, like other web fuzzers
+Fuzzing in Phage is based on a simple concept, like other web fuzzers
 ([Ffuf](https://github.com/ffuf/ffuf),
 [Wfuzz](https://github.com/xmendez/wfuzz)), go over the data section
 (`-d`), and replace any reference to the `FUZZ` keyword with the value
@@ -219,36 +203,22 @@ wordlist file.
 #### Use `Quic-Fin-Sync`, go over the data section (`-d`), and replace any reference to the `FUZZ` keyword with the value given in the wordlist file (`-w`) as the payload
 
 ```bash
-quicdraw <https://http3_server.com/path> -w path/to/wordlist -d '{"example_key":"FUZZ"}'
+phage <https://http3_server.com/path> -w path/to/wordlist -d '{"example_key":"FUZZ"}'
 ```
 
 ---
 
-# QuicDraw-UI
+# Phage-UI
+
+Phage-UI is an HTTP/3 request editor: a GUI for Phage's fuzzing and racing client.
+
+## Install phage-ui using pip (PyPi)
+
+The easiest way to install Phage-UI is to run:
 
 ```bash
-    -----------
-    QuicDraw-UI: HTTP/3 Request Editor - A GUI for QuicDraw(H3): HTTP/3 Fuzzing and Racing (Client)
-    -----------
-               _         _
-              (_)       | |                            __  ______
-    __ _ _   _ _  ___ __| |_ __ __ ___      __        / / / /  _/
-   / _` | | | | |/ __/ _` | '__/ _` \ \ /\ / / _____ / / / // /
-  | (_| | |_| | | (_| (_| | | | (_| |\ V  V / /____// /_/ // /
-   \__, |\__,_|_|\___\__,_|_|  \__,_| \_/\_/        \____/___/
-      |_|    _______
-         \  |QFS____| -------------------- HTTP/3
-          \ |_//
-            |_|
-```
-
-## Install quicdraw-ui using pip (PyPi)
-
-The easiest way to install QuicDraw-UI is to run:
-
-```bash
-pip install quicdraw[ui]
-quicdraw-ui -h
+pip install phage[ui]
+phage-ui -h
 ```
 
 ## Example 1: Simple HTTP/3 Request
@@ -256,7 +226,7 @@ quicdraw-ui -h
 Send a basic request to an HTTP/3 server:
 
 ```bash
-quicdraw-ui https://www.cyberark.com
+phage-ui https://example.com
 ```
 
 **HTTP/3 Request Editor:** ![HTTP/3 Request
@@ -291,7 +261,7 @@ To fuzz an HTTP/3 endpoint, you need:
     entry
 
 ```bash
-quicdraw-ui https://www.cyberark.com -w path/to/wordlist -d '{"example_key":"FUZZ"}'
+phage-ui https://example.com -w path/to/wordlist -d '{"example_key":"FUZZ"}'
 ```
 
 ![Fuzzing Example](screenshots/fuzzing.png)
@@ -303,7 +273,7 @@ each line from your wordlist file.
 
 ## Command-Line Options
 
-QuicDraw-UI parameters are imported to the UI.
+Phage-UI parameters are imported to the UI.
 
 ---
 
@@ -329,7 +299,7 @@ substitution)
 ---
 
 Note: "copy-as-curl compatible" meaning common curl arguments (-d,-H,-b)
-are supported by QuicDraw-UI.
+are supported by Phage-UI.
 
 ---
 

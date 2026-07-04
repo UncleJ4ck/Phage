@@ -22,3 +22,19 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# QuicDraw-evo lab artifacts (not source)
+lab/external-labs/
+lab/logs/
+lab/certs/
+lab/*.log
+poc.json
+.dev-swap-evidence.md
+
+lab/*.out
+lab/*.stderr
+lab/poc_*.json
+lab/finder_demo.py
+
+lab/cve_scan.py
+lab/h1_cve_scan.py

@@ -1,0 +1,60 @@
+# Production-realistic H3 edge -> H1 origin lab.
+#
+# HAProxy 3.0 terminates HTTP/3 (QUIC) at the edge and load-balances HTTP/1.1
+# to a pool of two origin replicas with health checks, the way a real
+# deployment fronts an app. The origins share one request-boundary log so the
+# oracle sees every request regardless of which replica served it.
+#
+# Localhost only. Do not expose the ports beyond your own machine.
+x-origin: &origin
+  image: python:3.13-slim
+  working_dir: /app
+  volumes:
+    - ../:/app:ro
+    - ./logs:/logs
+  environment:
+    PYTHONPATH: /app/src
+    QD_ECHO_HOST: "0.0.0.0"
+    QD_ECHO_PORT: "8080"
+    QD_ECHO_LOG: /logs/echo.jsonl
+  command: python -m phage.evo.echo_backend
+  restart: unless-stopped
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        python -c "import socket;s=socket.create_connection(('127.0.0.1',8080),2);
+        s.sendall(b'GET /health HTTP/1.1\r\nHost: x\r\n\r\n');s.recv(64)"
+    interval: 5s
+    timeout: 3s
+    retries: 3
+  networks:
+    - labnet
+
+services:
+  origin1:
+    <<: *origin
+  origin2:
+    <<: *origin
+
+  edge:
+    image: haproxytech/haproxy-alpine:3.0
+    depends_on:
+      origin1:
+        condition: service_healthy
+      origin2:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4433:4433/udp"
+      - "127.0.0.1:4433:4433/tcp"
+      - "127.0.0.1:8404:8404/tcp"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    networks:
+      - labnet
+
+networks:
+  labnet:
+    driver: bridge
