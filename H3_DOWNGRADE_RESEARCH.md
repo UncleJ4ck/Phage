@@ -305,6 +305,18 @@ frame, no mangle). So the `HTTP/1.0 0 ` type confusion is REQUEST-side only; the
 response-splitting variant. The ATS trailer bug is bounded to a request-side correctness
 issue (trailer promoted to body), not a desync.
 
+Whitebox confirmation (apache/trafficserver 10.1.x, Http2Stream.cc): the empirical anomaly
+is root-caused and proven benign for smuggling. In `Http2Stream::recv_end_of_headers`-path,
+for a trailing header ATS SKIPS `http2_convert_header_from_2_to_1_1` (line 304-308, "Trailing
+headers need no conversion") and then PRINTS `_receive_header` (the trailer HTTPHdr, still
+typed with its default `HTTP/1.0 0 ` start line) into `_receive_buffer` (the request body).
+The framing length cannot diverge from the emitted bytes: line 337 `int &num_header_bytes =
+dumpoffset;` aliases num_header_bytes to the running count of ACTUAL printed bytes, and line
+375 sets `read_vio.nbytes = data_length + num_header_bytes`. So the chunk size always equals
+the printed trailer bytes (no length_get-vs-print divergence, the classic desync class). This
+matches the live result (llhttp frames 1 request in every trailer edge case). Confirmed: a
+correctness bug (trailer serialized into the body with a bogus start line), not a desync.
+
 ## OpenLiteSpeed / lsquic (2026-07-09) - the least-audited major QUIC stack
 Stood up OpenLiteSpeed 1.9.1 (lsquic 4.8.2, BoringSSL) as an H3 reverse proxy -> tap -> node
 llhttp backend (lab_lsws_h3). Config gotchas solved: needs `mime`, a real vhRoot, and a
