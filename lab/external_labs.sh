@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clone and bring up the already-published smuggling labs next to QuicDraw-evo.
+# Clone and bring up the already-published smuggling labs next to Phage.
 # Needs docker + network egress. Not run in the dev sandbox (no egress there).
 # Usage: ./external_labs.sh [up|status|down]
 set -euo pipefail

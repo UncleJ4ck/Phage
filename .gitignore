@@ -23,7 +23,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# QuicDraw-evo lab artifacts (not source)
+# Phage lab artifacts (not source)
 lab/external-labs/
 lab/logs/
 lab/certs/
@@ -39,7 +39,7 @@ lab/finder_demo.py
 lab/cve_scan.py
 lab/h1_cve_scan.py
 
-# QuicDraw-evo H3/H2 downgrade labs: commit scaffolding, never secrets or logs
+# Phage H3/H2 downgrade labs: commit scaffolding, never secrets or logs
 lab_*/*.key
 lab_*/*.crt
 lab_*/*.pem
