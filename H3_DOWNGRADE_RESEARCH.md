@@ -135,6 +135,21 @@ audit green. VERIFIED against real HAProxy (its H2 TCP listener):
 on vuln 3.0.10, fixed on 3.0.24. Same class as the H3 CVE, reached over H2. Already
 patched on current HAProxy -> not a new CVE there.
 
+### CORRECTION (2026-07-09): the H2 claim above does NOT reproduce
+On careful re-test the H2->H1 standalone-END_STREAM does NOT reproduce on HAProxy
+3.0.10. The exact prior genome (HEADERS content-length:N + END_STREAM, no DATA) is
+answered with RST_STREAM error 0x01 (PROTOCOL_ERROR); 0 bytes forwarded to the backend;
+the victim frames cleanly (no poisoning). Verified BOTH via the old raw handshake and
+the new hyper-h2 handshake (A/B identical), so the driver is not the cause. The H2
+poisoning oracle was validated separately: injecting a CL:10-mismatched pipelined pair
+DIRECTLY at conn_bk mangles the victim into `REQ M HTTP/1.1` (first 10 bytes eaten),
+while a clean pair logs both requests intact - so the "victim clean => no poisoning"
+read is trustworthy. No saved PoC artifact (poc.json / repro script) backs the prior
+H2 claim. Mechanism: HAProxy's H2 mux validates content-length against DATA (RFC 9113
+/ RFC7540 8.1.2.6) and rejects pre-downgrade; the `!b_data && fin` fast-path bug is
+H3-mux-specific (the H3 standalone-FIN still desyncs on 3.0.10, re-verified this
+session: cl=10, body=0). Prior H2 claim is RETRACTED pending a reproducible PoC.
+
 STILL OPEN (honest): sozu H2->H1 and ATS H2->H1 UNTESTED. sozu 2.1.0 HTTPS needs
 dynamic cert loading via its command socket (static TOML did not create a TLS
 listener); ATS H3 acceptor compiled out of release. These are the real remaining gaps.
@@ -163,3 +178,50 @@ the code as receiver-side (aborts the response, not the request body) = QUIC-sta
 coverage, not a request-smuggling primitive. MAX_STREAM_DATA=0 NOT built: aioquic
 auto-manages the window and forcing 0 just stalls the connection (a DoS/liveness knob,
 not a smuggling primitive). Honest boundary, not padded.
+
+## Blockers cleared + three gaps closed (2026-07-09)
+
+### sozu(kawa) H2->H1 - was "blocked", now tested (controlled negative)
+The prior "sozu HTTPS needs command-socket certs" was a MISDIAGNOSIS. The binary carries
+a full H2 frontend (`mux::h2::ConnectionH2<FrontRustls>`, ALPN advertises h2/http11) and
+an H1 serializer for the downgrade. Real fix: the listener's `received listeners: []`
+log is printed BEFORE static config applies; the HTTPS listener with inline
+certificate/key/certificate_chain comes up fine (ALPN defaults to ["h2","http/1.1"]).
+Two real Phage driver bugs surfaced and were fixed to reach strict RFC 9113 servers:
+(1) send_h2 blasted a premature SETTINGS-ACK before reading the server SETTINGS - strict
+sozu drops the connection; now it reads the server preface then ACKs. (2) SNI defaulted
+to the IP; sozu is name-routed, so send_h2 gained an `sni` arg. SENTINEL: benign H2 GET
+frames exactly 1 clean `GET /sentinel HTTP/1.1` at conn_bk. All 7 published H2->H1
+primitives (standalone-END_STREAM, H2.CL, H2.CL-short, CRLF-in-value, :path request-line
+injection, H2.TE, dup-CL) are rejected with RST_STREAM error 0x01 (PROTOCOL_ERROR);
+sozu emits 0 bytes to the backend and the pool-poisoning victim frames cleanly.
+=> No H2->H1 surface via these primitives on sozu 2.1.0: the CL/CRLF/framing checks fire
+at the H2 mux before the H1 serializer. Frame this as "no surface via this primitive
+set" (mux-layer validation is likely class-wide across modern H2 stacks), not "sozu is
+specially hardened".
+
+### ATS 10.1.2 H2->H1 - lab built, tested (controlled negative)
+New lab_ats_h2: ATS 10.1.2 (latest, patched) H2/TLS front (4443) -> tap -> conn_bk.
+SENTINEL: benign H2 GET emits clean `GET /sentinel HTTP/1.1` to backend. All 7 primitives
+rejected: 6 via RST_STREAM, the :path request-line injection via a 400 Bad Request page
+over H2; 0 forwarded to the backend, no poisoning.
+=> No H2->H1 surface via these primitives on ATS 10.1.2 (same mux-layer validation read
+as sozu). Both evolutionary H2 hunts (40 gens x 4 seeds, all 32 operators, stabilize n=3)
+against ATS and sozu also returned 0 smuggle candidates. H2 poisoning oracle validated by
+direct conn_bk injection (mangled victim on a CL lie, clean victim otherwise). send_h2 was
+moved onto hyper-h2 for the conformant handshake (A/B identical to the old raw handshake).
+
+### H3->H1 synthesis - full raw-QPACK battery run (controlled negative)
+Redeployed lab_h3cve (HAProxy 3.0.10 H3 4434 -> tap -> conn_bk). Oracle live: CVE
+standalone-FIN reproduces (cl=10, body=0, desync). Fired the raw-QPACK synthesis battery
+(CRLF-in-value, :path request-line injection, CRLF-in-authority, dup :path, NUL/CR,
+bare-LF) via driver raw=True. NEGATIVE CONTROL: a raw-QPACK header with a long VALID
+28-byte value reaches the backend (`x-long: aaaa...`), proving the encoder sends valid
+QPACK. Every malformed synthesis probe emits 0 bytes to the backend (HAProxy rejects at
+the H3/QPACK layer before downgrade), no marker leaked, no request splitting.
+=> HAProxy H3->H1 validates QPACK field content before serializing. Controlled negative.
+
+Verdict this round: three "blocked/untested" gaps closed with sentinel-backed, negative-
+control-checked results. All are strong NEGATIVES (hardened proxies), plus two genuine
+Phage H2-driver bug fixes. Evolutionary H2 hunts (all 32 operators) against ATS and sozu
+running to hunt combinations the hand battery missed.

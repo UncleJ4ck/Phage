@@ -7,6 +7,7 @@ activate_listeners = true
 protocol = "https"
 address = "0.0.0.0:8443"
 tls_versions = ["TLS_V12", "TLS_V13"]
+alpn_protocols = ["h2", "http/1.1"]
 [clusters]
 [clusters.C]
 protocol = "http"

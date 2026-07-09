@@ -79,10 +79,19 @@ def drive_h2_bytes(genome: Genome, stream_id: int = 1) -> bytes:
 
 
 def send_h2(
-    host: str, port: int, genome: Genome, timeout: float = 4.0
+    host: str, port: int, genome: Genome, timeout: float = 4.0, sni: str = None
 ) -> Tuple[bytes, bool]:
-    """Open TLS(alpn h2), send preface+SETTINGS+SETTINGS-ACK and the genome's frames,
-    drain the response. Returns (client_bytes, clean_eof)."""
+    """Open TLS(alpn h2), let hyper-h2 run the conformant connection handshake
+    (preface + SETTINGS + ACK ordering, flow control), then write the genome's raw
+    frames so malformed HEADERS/DATA that h2 would refuse still reach the wire.
+    Returns (client_bytes, clean_eof). `sni` sets the TLS server name when it must
+    differ from `host` (name-routed proxies like sozu match the frontend by SNI).
+
+    hyper-h2 is imported lazily so the pure serializers (drive_h2_bytes/hpack_encode/
+    h2_frame) stay importable and unit-testable without it."""
+    import h2.config
+    import h2.connection
+
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -91,17 +100,24 @@ def send_h2(
     clean = False
     try:
         raw = socket.create_connection((host, port), timeout=timeout)
-        s = ctx.wrap_socket(raw, server_hostname=host)
+        s = ctx.wrap_socket(raw, server_hostname=sni or host)
     except OSError:
         return b"", False
     try:
-        s.sendall(
-            PREFACE
-            + h2_frame(FT_SETTINGS, 0, 0, b"")
-            + h2_frame(FT_SETTINGS, FLAG_ACK, 0, b"")
+        conn = h2.connection.H2Connection(
+            config=h2.config.H2Configuration(client_side=True)
         )
-        s.sendall(drive_h2_bytes(genome))
+        conn.initiate_connection()  # conformant preface + client SETTINGS
+        s.sendall(conn.data_to_send())
         s.settimeout(timeout)
+        try:
+            conn.receive_data(s.recv(4096))  # server SETTINGS -> h2 queues the ACK
+            s.sendall(conn.data_to_send())
+        except Exception:  # noqa: BLE001 - a rejecting server is a valid outcome
+            pass
+        # Raw attack frames, straight to the wire: bypass h2's validation so the
+        # malformed request (CL lie, CRLF, dup pseudo) still reaches the proxy.
+        s.sendall(drive_h2_bytes(genome))
         while True:
             b = s.recv(4096)
             if not b:

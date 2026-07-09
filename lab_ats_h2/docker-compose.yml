@@ -1,0 +1,30 @@
+# ATS 10.1.2 H2 (TLS) edge -> tap -> CL-enforcing backend. Fuzz ATS's H2->H1
+# downgrade serializer with the raw-HPACK genes (standalone-END_STREAM, H2.CL, CRLF).
+services:
+  origin:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes: [ "../:/app:ro", "./logs:/logs" ]
+    environment: { CONN_LOG: /logs/conn_bk.log }
+    command: python /app/lab_ats_h2/conn_bk.py
+    networks: { a2: { ipv4_address: 172.42.0.10 } }
+  tap_ah:
+    image: python:3.12-slim
+    command: python /app/tap.py
+    environment: { TAP_LISTEN: "9095", TAP_UP: "172.42.0.10:8080", TAP_LOG: "/logs/tap_ah.jsonl" }
+    volumes: [ "./tap.py:/app/tap.py:ro", "./logs:/logs" ]
+    depends_on: [origin]
+    networks: { a2: { ipv4_address: 172.42.0.11 } }
+  ats:
+    image: trafficserver/trafficserver:latest
+    depends_on: [tap_ah]
+    ports: [ "127.0.0.1:4443:4443/tcp" ]
+    volumes:
+      - ./records.yaml:/opt/etc/trafficserver/records.yaml:ro
+      - ./remap.config:/opt/etc/trafficserver/remap.config:ro
+      - ./ip_allow.yaml:/opt/etc/trafficserver/ip_allow.yaml:ro
+      - ./ssl_multicert.config:/opt/etc/trafficserver/ssl_multicert.config:ro
+      - ./lab.pem:/certs/lab.pem:ro
+    networks: { a2: { ipv4_address: 172.42.0.12 } }
+networks:
+  a2: { ipam: { config: [ { subnet: 172.42.0.0/24 } ] } }
