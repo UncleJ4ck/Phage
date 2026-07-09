@@ -45,8 +45,8 @@ physics-inspired search mechanisms. See [docs/EVO.md](docs/EVO.md).
 - [Limitations](#limitations)
 - [Known issues](#known-issues)
 - [License](#license)
+- [Credits](#credits)
 - [Contact](#contact)
-  - [Contact Via LinkedIn](#contact-via-linkedin)
 
 ##  Main Features
 
@@ -103,7 +103,7 @@ from source.
 Clone the repository:
 
 ```bash
-git clone https://github.com/j4kuuu/phage.git
+git clone https://github.com/UncleJ4ck/Phage.git
 python3 -m build
 pip install .\dist\phage-<VERSION>.tar.gz
 ```
@@ -338,11 +338,17 @@ Copyright (c) 2025 CyberArk Software Ltd. All rights reserved This
 repository is licensed under the Apache-2.0 License - see
 [`LICENSE`](LICENSE) for more details.
 
+# Credits
+
+Phage is a fork of CyberArk Labs'
+[QuicDrawH3](https://github.com/cyberark/QuicDrawH3), the `Quic-Fin-Sync`
+racing client by Maor Abutbul, published in "[Racing and Fuzzing
+HTTP/3](https://www.cyberark.com/resources/threat-research-blog/racing-and-fuzzing-http-3-open-sourcing-quicdraw)".
+The `phage.evo` evolutionary engine and the HTTP/3-to-HTTP/1 downgrade
+research are additions on top of that base.
+
+Built on [aioquic](https://github.com/aiortc/aioquic).
+
 # Contact
 
-Feel free to contact us via GitHub issues if you have any feature
-requests or project issues.
-
-## Contact Via LinkedIn
-
-[Maor Abutbul](https://il.linkedin.com/in/maor-abutbul)
+Open a GitHub issue for feature requests or bugs.
