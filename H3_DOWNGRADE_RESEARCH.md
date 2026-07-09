@@ -298,3 +298,9 @@ Chunked-surface summary: nginx/Caddy/HAProxy buffer to CL (no chunked path); Env
 and sozu emit chunked for a no-CL body and all size the chunk faithfully (no smuggle vs
 llhttp). Only ATS mishandles trailers (folds into body). No request-smuggling desync found
 on the chunked path across the panel.
+
+ATS trailer bug, response side (resp_bk.js sends a chunked response with an H1 trailer):
+ATS DROPS the response trailer cleanly on H1->H2 (client gets HEADERS + DATA only, no trailer
+frame, no mangle). So the `HTTP/1.0 0 ` type confusion is REQUEST-side only; there is no
+response-splitting variant. The ATS trailer bug is bounded to a request-side correctness
+issue (trailer promoted to body), not a desync.
