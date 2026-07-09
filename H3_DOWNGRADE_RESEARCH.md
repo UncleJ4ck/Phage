@@ -304,3 +304,28 @@ ATS DROPS the response trailer cleanly on H1->H2 (client gets HEADERS + DATA onl
 frame, no mangle). So the `HTTP/1.0 0 ` type confusion is REQUEST-side only; there is no
 response-splitting variant. The ATS trailer bug is bounded to a request-side correctness
 issue (trailer promoted to body), not a desync.
+
+## OpenLiteSpeed / lsquic (2026-07-09) - the least-audited major QUIC stack
+Stood up OpenLiteSpeed 1.9.1 (lsquic 4.8.2, BoringSSL) as an H3 reverse proxy -> tap -> node
+llhttp backend (lab_lsws_h3). Config gotchas solved: needs `mime`, a real vhRoot, and a
+proxy extProcessor+context. H3 confirmed live: `curl --http3-only` -> HTTP/3 200, proxied to
+the backend.
+- H2->H1 (over TCP, shares the H1 downgrade serializer): CLEAN negative. Chunks a no-CL body
+  faithfully (te=chunked, 1 request), rejects trailers, rejects CL<data and CL:0+body, and
+  rejects all synthesis primitives (standalone-END_STREAM, CRLF-in-value, :path request-line
+  injection, dup :path, H2.TE) - 0 forwarded to the backend in every case.
+- H3-specific mux (standalone-FIN, raw-QPACK synthesis): NOT tested. aioquic (Phage's H3
+  client) cannot complete the QUIC handshake with lsquic (ConnectionError, likely OLS's
+  8-way SO_REUSEPORT return path); curl-h3 works but cannot emit malformed QPACK. So the
+  lsquic H3 mux is the one reachable surface still unmeasured. Honest gap, blocker named.
+
+## Round verdict (2026-07-09)
+Tested H3->H1 and/or H2->H1 across HAProxy, nginx, Caddy, Envoy, ATS, sozu, OpenLiteSpeed
+for synthesis (QPACK/HPACK field injection), CL-lies (standalone-FIN, body-length-lie),
+chunked re-framing, and trailers, each sentinel-backed with a validated oracle (CL poisoning
+oracle AND a Node/llhttp chunked+split oracle, both positive-controlled). Result: no new
+request-smuggling desync. Every stack validates field content and CL/body before or during
+the H1 downgrade and sizes chunks faithfully. One genuine but non-security ATS bug (H2
+trailer folded into the H1 body with an `HTTP/1.0 0 ` prefix). The only live desync remains
+the already-patched HAProxy H3-mux standalone-FIN (CVE-2026-33555). Unmeasured: the lsquic
+H3 mux (aioquic interop), and response-side / cross-hop (chain-emergent) surfaces.

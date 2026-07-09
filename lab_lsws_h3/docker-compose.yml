@@ -1,0 +1,29 @@
+# OpenLiteSpeed (lsquic) H3 edge -> tap -> Node/llhttp backend. The least-audited major
+# QUIC/H3 stack; test its H3->H1 downgrade for synthesis and CL/chunked desync.
+services:
+  origin:
+    image: node:22-alpine
+    working_dir: /app
+    volumes: [ "./chunk_bk.js:/app/chunk_bk.js:ro", "./logs:/logs" ]
+    environment: { CHUNK_LOG: /logs/chunk_bk.log }
+    command: node /app/chunk_bk.js
+    networks: { l3: { ipv4_address: 172.49.0.10 } }
+  tap_ls:
+    image: python:3.12-slim
+    command: python /app/tap.py
+    environment: { TAP_LISTEN: "9098", TAP_UP: "172.49.0.10:8080", TAP_LOG: "/logs/tap_ls.jsonl" }
+    volumes: [ "./tap.py:/app/tap.py:ro", "./logs:/logs" ]
+    depends_on: [origin]
+    networks: { l3: { ipv4_address: 172.49.0.11 } }
+  lsws:
+    image: litespeedtech/openlitespeed:latest
+    depends_on: [tap_ls]
+    ports: [ "127.0.0.1:4440:4440/udp", "127.0.0.1:4440:4440/tcp" ]
+    volumes:
+      - ./httpd_config.conf:/usr/local/lsws/conf/httpd_config.conf:ro
+      - ./vhconf.conf:/usr/local/lsws/conf/vhconf.conf:ro
+      - ./lab.crt:/certs/lab.crt:ro
+      - ./lab.key:/certs/lab.key:ro
+    networks: { l3: { ipv4_address: 172.49.0.12 } }
+networks:
+  l3: { ipam: { config: [ { subnet: 172.49.0.0/24 } ] } }
