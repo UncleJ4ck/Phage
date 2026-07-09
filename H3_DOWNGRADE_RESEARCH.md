@@ -288,3 +288,13 @@ mismatch (content placed in an H2 trailer reaches the backend as body); it is no
 front/back framing desync. Worth an upstream ATS report, not a CVE. Still open: the
 response-side of the same trailer type confusion (server->client), and sozu(kawa) chunked
 re-framing (untested with the llhttp oracle).
+
+sozu 2.1.0 (kawa) chunked, tested against llhttp: chunks a no-CL body faithfully (te=chunked,
+body opaque, 1 request), and REJECTS trailer-bearing requests entirely (benign trailer -> 0
+forwarded; CRLF trailer -> RST), plus rejects CL<data and CL:0+body. Stricter than ATS, no
+trailer-folding bug. Clean negative.
+
+Chunked-surface summary: nginx/Caddy/HAProxy buffer to CL (no chunked path); Envoy, ATS,
+and sozu emit chunked for a no-CL body and all size the chunk faithfully (no smuggle vs
+llhttp). Only ATS mishandles trailers (folds into body). No request-smuggling desync found
+on the chunked path across the panel.
