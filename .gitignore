@@ -47,3 +47,4 @@ lab_*/*.log
 lab_*/*.jsonl
 lab_*/logs/
 lab_*/**/__pycache__/
+lab_*/envoy.local.yaml

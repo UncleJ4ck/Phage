@@ -225,3 +225,35 @@ Verdict this round: three "blocked/untested" gaps closed with sentinel-backed, n
 control-checked results. All are strong NEGATIVES (hardened proxies), plus two genuine
 Phage H2-driver bug fixes. Evolutionary H2 hunts (all 32 operators) against ATS and sozu
 running to hunt combinations the hand battery missed.
+
+## H3->H1 panel: nginx, Caddy, Envoy (2026-07-09)
+Ran the portable H3 panel (h3_panel.py: raw-QPACK synthesis battery + standalone-FIN /
+body-length-lie downgrade battery, sentinel first) over real H3 against three stacks
+beyond HAProxy. Sentinel per stack = benign raw-QPACK GET frames exactly 1 clean H1 at
+the backend (the raw path reaches the origin, so a 0-byte forward on a malformed probe is
+the stack rejecting, not a tooling miss).
+
+- nginx 1.27 own-H3 (4438): all 8 primitives forwarded 0 bytes. Rejects synthesis and the
+  CL-lie at the H3 layer. Negative.
+- Caddy 2 / quic-go (4437): synthesis (CRLF/dup-pseudo/NUL/LF) all rejected (0 bytes). The
+  standalone-FIN and body-length-lie ARE forwarded (tap shows CL:10/body:0, CL:20/body:4)
+  but NON-exploitable, now proven rigorously: (a) Caddy pools the backend conn (5 requests
+  -> 1 conn_bk CONN), so the poisoning oracle is live; (b) poison-then-victim leaves the
+  victim intact (Go's transferWriter closes the short-body conn); (c) benign POST control
+  clean; (d) the CL<body direction is safe too - Caddy TRUNCATES the body to the declared
+  Content-Length (CL:0 forwards 0 body, CL:4 forwards only the 4 declared bytes, extra
+  smuggled bytes dropped). Thorough negative.
+- Envoy 1.31 / quiche (4439): all 8 primitives forwarded 0 bytes. Rejects synthesis and
+  the CL-lie at the H3 layer. Negative. (Envoy re-frames the body to the backend as
+  transfer-encoding chunked, a different downgrade shape, but generates well-formed chunks.)
+
+Envoy unblock (cross-session): the "Failed to load incomplete private key" was NOT a key
+problem (RSA PKCS8, RSA PKCS1, and ECDSA P-256 all failed identically; the container reads
+the key fine). Envoy's QUIC transport socket rejects filename-based keys in v1.31;
+inline_string works. gen_envoy_inline.py embeds the local cert/key inline into a gitignored
+envoy.local.yaml (the committed envoy.yaml stays a secret-free filename template).
+
+=> All four reachable H3->H1 downgraders (HAProxy, nginx, Caddy, Envoy) validate QPACK
+field content and CL/body at the H3 layer before the H1 downgrade. The H3->H1 synthesis
+and CL-lie surface is class-wide-defended on current builds. The only live desync remains
+the already-patched HAProxy H3-mux standalone-FIN (CVE-2026-33555). No new CVE.

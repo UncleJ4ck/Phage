@@ -19,7 +19,7 @@ services:
     depends_on: [tap_ev]
     ports: [ "127.0.0.1:4439:4439/udp", "127.0.0.1:4439:4439/tcp" ]
     volumes:
-      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./envoy.local.yaml:/etc/envoy/envoy.yaml:ro
       - ./lab.crt:/certs/lab.crt:ro
       - ./lab.key:/certs/lab.key:ro
     networks: { e3: { ipv4_address: 172.44.0.12 } }
