@@ -10,7 +10,7 @@ Headers(content-length:N, end_stream=True) with no DATA is the H2 standalone-FIN
 
 import socket
 import ssl
-from typing import List, Tuple
+from typing import Tuple
 
 from .genome import Data, Delay, Fin, Genome, Headers, Reset
 
@@ -40,15 +40,19 @@ def hpack_encode(fields) -> bytes:
     validation the way the raw QPACK path does for H3."""
     out = bytearray()
     for name, value in fields:
-        out += b"\x00"                              # literal, no index, new name
+        out += b"\x00"  # literal, no index, new name
         out += _hpack_int(0x00, 7, len(name)) + name
         out += _hpack_int(0x00, 7, len(value)) + value
     return bytes(out)
 
 
 def h2_frame(ftype: int, flags: int, stream_id: int, payload: bytes) -> bytes:
-    return (len(payload).to_bytes(3, "big") + bytes([ftype, flags])
-            + (stream_id & 0x7FFFFFFF).to_bytes(4, "big") + payload)
+    return (
+        len(payload).to_bytes(3, "big")
+        + bytes([ftype, flags])
+        + (stream_id & 0x7FFFFFFF).to_bytes(4, "big")
+        + payload
+    )
 
 
 def drive_h2_bytes(genome: Genome, stream_id: int = 1) -> bytes:
@@ -66,13 +70,17 @@ def drive_h2_bytes(genome: Genome, stream_id: int = 1) -> bytes:
         elif isinstance(op, Fin):
             out += h2_frame(FT_DATA, FLAG_END_STREAM, stream_id, b"")
         elif isinstance(op, Reset):
-            out += h2_frame(FT_RST, 0, stream_id, (op.error_code & 0xFFFFFFFF).to_bytes(4, "big"))
+            out += h2_frame(
+                FT_RST, 0, stream_id, (op.error_code & 0xFFFFFFFF).to_bytes(4, "big")
+            )
         elif isinstance(op, Delay):
             continue  # timing handled by the caller for the split-send path
     return bytes(out)
 
 
-def send_h2(host: str, port: int, genome: Genome, timeout: float = 4.0) -> Tuple[bytes, bool]:
+def send_h2(
+    host: str, port: int, genome: Genome, timeout: float = 4.0
+) -> Tuple[bytes, bool]:
     """Open TLS(alpn h2), send preface+SETTINGS+SETTINGS-ACK and the genome's frames,
     drain the response. Returns (client_bytes, clean_eof)."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -87,8 +95,11 @@ def send_h2(host: str, port: int, genome: Genome, timeout: float = 4.0) -> Tuple
     except OSError:
         return b"", False
     try:
-        s.sendall(PREFACE + h2_frame(FT_SETTINGS, 0, 0, b"")
-                  + h2_frame(FT_SETTINGS, FLAG_ACK, 0, b""))
+        s.sendall(
+            PREFACE
+            + h2_frame(FT_SETTINGS, 0, 0, b"")
+            + h2_frame(FT_SETTINGS, FLAG_ACK, 0, b"")
+        )
         s.sendall(drive_h2_bytes(genome))
         s.settimeout(timeout)
         while True:

@@ -968,7 +968,9 @@ class TestRawH3Frames(unittest.TestCase):
         # the DATA frame (type 0x00, len 2, body) with the FIN.
         data_call = next(c for c in raw_calls if c[1] == b"\x00\x02XY")
         self.assertTrue(data_call[2])
-        self.assertTrue(any(c[1].startswith(b"\x01") for c in raw_calls))  # HEADERS frame
+        self.assertTrue(
+            any(c[1].startswith(b"\x01") for c in raw_calls)
+        )  # HEADERS frame
         self.assertNotIn("h", kinds)  # aioquic send_headers bypassed in raw mode
 
 
@@ -1523,7 +1525,11 @@ class TestPhageUpgrades(unittest.TestCase):
     def _chunked(self, body: bytes):
         return [
             G.Headers(
-                ((b":method", b"POST"), (b":path", b"/"), (b"transfer-encoding", b"chunked"))
+                (
+                    (b":method", b"POST"),
+                    (b":path", b"/"),
+                    (b"transfer-encoding", b"chunked"),
+                )
             ),
             G.Data(body, end_stream=True),
         ]
@@ -1615,7 +1621,9 @@ class TestPhageUpgrades(unittest.TestCase):
         clean = render_h1(self._chunked(b"1\r\nX\r\n0\r\n\r\n"))
         self.assertIn("bare_lf", malformations(bare))
         self.assertNotIn("bare_lf", malformations(clean))
-        self.assertEqual(malformation_descriptor(self._chunked(b"1\r\nX\n0\r\n\r\n"))[1], "body")
+        self.assertEqual(
+            malformation_descriptor(self._chunked(b"1\r\nX\n0\r\n\r\n"))[1], "body"
+        )
 
     def test_h2_hpack_and_frame_encoding(self):
         # HPACK literal encoding must carry ANY bytes (incl CRLF/dup-pseudo) and
@@ -1628,12 +1636,16 @@ class TestPhageUpgrades(unittest.TestCase):
             self.skipTest("hpack lib not installed")
         for fields in [
             [(b":method", b"GET"), (b":path", b"/")],
-            [(b":path", b"/x"), (b"x-inj", b"a\r\nEvil: 1")],   # CRLF survives HPACK
-            [(b":path", b"/a"), (b":path", b"/b")],             # dup pseudo
+            [(b":path", b"/x"), (b"x-inj", b"a\r\nEvil: 1")],  # CRLF survives HPACK
+            [(b":path", b"/a"), (b":path", b"/b")],  # dup pseudo
         ]:
-            got = [(k.encode() if isinstance(k, str) else k,
-                    v.encode() if isinstance(v, str) else v)
-                   for k, v in Decoder().decode(H2.hpack_encode(fields))]
+            got = [
+                (
+                    k.encode() if isinstance(k, str) else k,
+                    v.encode() if isinstance(v, str) else v,
+                )
+                for k, v in Decoder().decode(H2.hpack_encode(fields))
+            ]
             self.assertEqual(got, fields)
         # frame header: 3-byte length + type + flags + 4-byte stream id
         f = H2.h2_frame(H2.FT_DATA, H2.FLAG_END_STREAM, 1, b"XY")
@@ -1643,7 +1655,11 @@ class TestPhageUpgrades(unittest.TestCase):
         self.assertEqual(f[9:], b"XY")
         # genome -> frames: Headers(end_stream) -> HEADERS with END_STREAM; Fin ->
         # empty DATA with END_STREAM (the H2 standalone-FIN); Reset -> RST_STREAM.
-        g = [G.Headers(((b":method", b"POST"), (b"content-length", b"10")), end_stream=True)]
+        g = [
+            G.Headers(
+                ((b":method", b"POST"), (b"content-length", b"10")), end_stream=True
+            )
+        ]
         blob = H2.drive_h2_bytes(g)
         self.assertEqual(blob[3], H2.FT_HEADERS)
         self.assertTrue(blob[4] & H2.FLAG_END_STREAM)
@@ -1661,9 +1677,27 @@ class TestPhageUpgrades(unittest.TestCase):
 
         base = G.seed_post(body=b"AAAA")
         cases = [
-            (G._mut_ws_before_colon, (b"transfer-encoding : chunked", b"content-length : 0"), "ws_colon"),
-            (G._mut_bare_lf_header, (b"x-pad: 1\nTransfer-Encoding: chunked", b"x-pad: 1\nContent-Length: 0"), "head_bare_lf"),
-            (G._mut_bare_cr_header, (b"x-pad: 1\rTransfer-Encoding: chunked", b"x-pad: 1\rContent-Length: 0"), "head_bare_cr"),
+            (
+                G._mut_ws_before_colon,
+                (b"transfer-encoding : chunked", b"content-length : 0"),
+                "ws_colon",
+            ),
+            (
+                G._mut_bare_lf_header,
+                (
+                    b"x-pad: 1\nTransfer-Encoding: chunked",
+                    b"x-pad: 1\nContent-Length: 0",
+                ),
+                "head_bare_lf",
+            ),
+            (
+                G._mut_bare_cr_header,
+                (
+                    b"x-pad: 1\rTransfer-Encoding: chunked",
+                    b"x-pad: 1\rContent-Length: 0",
+                ),
+                "head_bare_cr",
+            ),
             (G._mut_obs_fold, (b"transfer-encoding: \r\n chunked",), "obs_fold"),
             (G._mut_absolute_form, (b"POST http://lab/ HTTP/1.1",), "abs_form"),
             (G._mut_rl_space, (b"POST  / HTTP/1.1", b"POST\t / HTTP/1.1"), "rl_ws"),
@@ -1702,11 +1736,26 @@ class TestPhageUpgrades(unittest.TestCase):
 
         base = G.seed_post(body=b"AAAA")
         specs = [
-            (G._mut_chunk_ext, "chunk_ext", lambda b: _re.search(rb"(?m)^[0-9a-fA-F]+;", b)),
-            (G._mut_chunk_size_obfuscate, "chunk_size_obf",
-             lambda b: (_re.search(rb"(?m)^0[0-9a-fA-F]", b) or _re.search(rb"(?m)^[0-9a-fA-F]+[ \t]", b)
-                        or b.startswith(b"0x") or b.startswith(b"+"))),
-            (G._mut_chunk_trailer, "chunk_trailer", lambda b: _re.search(rb"0\r\n[A-Za-z][^\r\n]*:", b)),
+            (
+                G._mut_chunk_ext,
+                "chunk_ext",
+                lambda b: _re.search(rb"(?m)^[0-9a-fA-F]+;", b),
+            ),
+            (
+                G._mut_chunk_size_obfuscate,
+                "chunk_size_obf",
+                lambda b: (
+                    _re.search(rb"(?m)^0[0-9a-fA-F]", b)
+                    or _re.search(rb"(?m)^[0-9a-fA-F]+[ \t]", b)
+                    or b.startswith(b"0x")
+                    or b.startswith(b"+")
+                ),
+            ),
+            (
+                G._mut_chunk_trailer,
+                "chunk_trailer",
+                lambda b: _re.search(rb"0\r\n[A-Za-z][^\r\n]*:", b),
+            ),
         ]
         for op, tag, shape in specs:
             for seed in range(12):
@@ -1762,16 +1811,20 @@ class TestPhageUpgrades(unittest.TestCase):
             g = G.seed_post(body=b"AAAA")
             for name in G.H3_OPERATOR_NAMES:
                 g = getattr(G, name)(g, rng)
-            raw = render_h1(g)          # must not raise
+            raw = render_h1(g)  # must not raise
             self.assertIsInstance(raw, bytes)
-            G.descriptor(g); malformation_descriptor(g); malformations(raw)
+            G.descriptor(g)
+            malformation_descriptor(g)
+            malformations(raw)
             # Fin never renders into H1 bytes
             self.assertNotIn(b"Fin", raw)
 
     def test_patch_guided_weights_boost_matching_family(self):
         from phage.evo.patch_guided import patch_guided_weights
 
-        w = patch_guided_weights("Fix prev_is_cr flag handling in chunked encoding parser")
+        w = patch_guided_weights(
+            "Fix prev_is_cr flag handling in chunked encoding parser"
+        )
         self.assertEqual(len(w), len(G.OPERATORS))
         names = [op.__name__ for op in G.OPERATORS]
         bare = w[names.index("_mut_bare_lf_chunk")]
@@ -1830,7 +1883,9 @@ class TestPhageUpgrades(unittest.TestCase):
                 f.write("not json at all\n")
                 f.write('{"n": 1, "bound')  # partial write, no newline
             recs, off = read_new_records(p, 0)
-            self.assertEqual([r["n"] for r in recs], [2])  # good line kept, garbage skipped
+            self.assertEqual(
+                [r["n"] for r in recs], [2]
+            )  # good line kept, garbage skipped
             self.assertLess(off, os.path.getsize(p))  # partial tail held back
             # complete the partial line; the next read must pick it up
             with open(p, "a") as f:
@@ -1841,7 +1896,6 @@ class TestPhageUpgrades(unittest.TestCase):
     def test_coevolve_hardens_defender(self):
         # Regression: with a defender, findings must harden it (Red Queen actually
         # starts). Before the fix the defender stayed empty forever.
-        from phage.evo.archive import Archive
         from phage.evo.coevolution import Defender
         from phage.evo.evolve import evolve
 
@@ -1901,7 +1955,11 @@ class TestPhageUpgrades(unittest.TestCase):
 
         def offline(g):
             # deterministic stand-in for "vuln accepts a bare-LF chunk terminator"
-            body = render_h1(g).split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in render_h1(g) else b""
+            body = (
+                render_h1(g).split(b"\r\n\r\n", 1)[1]
+                if b"\r\n\r\n" in render_h1(g)
+                else b""
+            )
             return Observation(2) if trig.search(body) else Observation(1)
 
         pos = self._chunked(b"1\r\nX\n0\r\n\r\n")
@@ -1929,18 +1987,22 @@ class TestChainOracle(unittest.TestCase):
     def test_emergent_is_a_finding(self):
         from phage.evo.chain import make_chain_run_case, result_kind
 
-        rc = make_chain_run_case(lambda raw: (1, 2), [lambda raw: (1, 1), lambda raw: (1, 1)])
+        rc = make_chain_run_case(
+            lambda raw: (1, 2), [lambda raw: (1, 1), lambda raw: (1, 1)]
+        )
         o = rc(self._g())
-        self.assertEqual(o.request_count, 2)          # DESYNC signal
+        self.assertEqual(o.request_count, 2)  # DESYNC signal
         self.assertEqual(result_kind(o), "emergent")
 
     def test_pairwise_only_is_filtered(self):
         from phage.evo.chain import make_chain_run_case, result_kind
 
         # chain smuggles (1->2) BUT pair 0 desyncs alone -> ordinary pairwise, not ours
-        rc = make_chain_run_case(lambda raw: (1, 2), [lambda raw: (1, 2), lambda raw: (1, 1)])
+        rc = make_chain_run_case(
+            lambda raw: (1, 2), [lambda raw: (1, 2), lambda raw: (1, 1)]
+        )
         o = rc(self._g())
-        self.assertEqual(o.request_count, 1)          # not a finding
+        self.assertEqual(o.request_count, 1)  # not a finding
         self.assertEqual(result_kind(o), "pairwise")
 
     def test_benign_chain_clean(self):

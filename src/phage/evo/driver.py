@@ -48,7 +48,7 @@ def _qpack_encode(fields) -> bytes:
     wire, unlike aioquic's conformant H3Connection.send_headers."""
     body = bytearray(b"\x00\x00")  # prefix: Required Insert Count 0, S=0 Delta Base 0
     for name, value in fields:
-        body += _qpack_int(0x20, 3, len(name)) + name   # 001 N=0 H=0, 3-bit name len
+        body += _qpack_int(0x20, 3, len(name)) + name  # 001 N=0 H=0, 3-bit name len
         body += _qpack_int(0x00, 7, len(value)) + value  # H=0, 7-bit value len
     return bytes(body)
 
@@ -82,7 +82,8 @@ async def _drive_ops(
                     # pseudo, request-line injection) reach the wire; aioquic's
                     # send_headers would reject them.
                     quic.send_stream_data(
-                        stream_id, h3_headers_frame(list(op.fields)),
+                        stream_id,
+                        h3_headers_frame(list(op.fields)),
                         end_stream=op.end_stream,
                     )
                 else:

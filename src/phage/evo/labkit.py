@@ -21,7 +21,9 @@ def truncate_and_verify(path: str) -> None:
     with open(path, "w"):
         pass
     if os.path.getsize(path) != 0:
-        raise RuntimeError(f"log {path} not empty after truncate: a writer is racing it")
+        raise RuntimeError(
+            f"log {path} not empty after truncate: a writer is racing it"
+        )
 
 
 @contextmanager

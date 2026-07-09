@@ -36,10 +36,8 @@ def read_new_records(path: str, offset: int) -> Tuple[List[dict], int]:
     # offset without one) can leave the final line partially written. Hold back a
     # non-newline-terminated tail so it is re-read complete next time, and skip any
     # line that still fails to parse. One malformed line must not abort the search.
-    held = 0
     if data and not data.endswith("\n"):
         cut = data.rfind("\n") + 1
-        held = len(data[cut:].encode("utf-8"))
         data = data[:cut]
     new_offset = offset + len(data.encode("utf-8"))
     records = []
@@ -135,7 +133,9 @@ def search(
         from .gates import calibrate
 
         calibrate(run_case, calibration[0], calibration[1])
-    evaluator = make_evaluator(run_case, baseline, expected, descriptor_fn=descriptor_fn)
+    evaluator = make_evaluator(
+        run_case, baseline, expected, descriptor_fn=descriptor_fn
+    )
     archive = Archive(k_variants=3 if neutral_drift else 1)
 
     population: List[Genome] = []

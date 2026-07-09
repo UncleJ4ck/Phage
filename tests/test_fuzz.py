@@ -26,7 +26,7 @@ from phage.evo.runner import search
 from phage.evo.safety import is_local_target
 from phage.evo.stigmergy import StigmergyMutator
 
-OP_TYPES = (G.Headers, G.Data, G.Delay, G.Reset)
+OP_TYPES = (G.Headers, G.Data, G.Delay, G.Reset, G.Fin, G.StopSending)
 
 
 def rand_response(rng):

@@ -18,11 +18,26 @@ from .genome import OPERATORS
 # OPERATORS reorder. Tokens are matched against the patch text.
 _KEYWORDS = {
     "_mut_bare_lf_chunk": {
-        "chunk", "chunked", "crlf", "prev_is_cr", "read_size", "terminator",
-        "linefeed", "carriage", "lf", "cr",
+        "chunk",
+        "chunked",
+        "crlf",
+        "prev_is_cr",
+        "read_size",
+        "terminator",
+        "linefeed",
+        "carriage",
+        "lf",
+        "cr",
     },
     "_mut_te_chunked": {"transfer", "encoding", "chunked", "chunk", "te"},
-    "_mut_te_obfuscate": {"transfer", "encoding", "obfuscat", "whitespace", "fold", "ws"},
+    "_mut_te_obfuscate": {
+        "transfer",
+        "encoding",
+        "obfuscat",
+        "whitespace",
+        "fold",
+        "ws",
+    },
     "_mut_nested_chunk": {"chunk", "chunked", "nested", "dechunk", "trailer"},
     "_mut_add_trailer": {"trailer", "chunk", "chunked"},
     "_mut_content_length": {"content", "length", "content_length", "cl"},
@@ -40,7 +55,9 @@ def _tokens(text: str) -> set:
     return set(_TOKEN.findall(text.lower()))
 
 
-def patch_guided_weights(diff_text: str, base: float = 1.0, boost: float = 4.0) -> List[float]:
+def patch_guided_weights(
+    diff_text: str, base: float = 1.0, boost: float = 4.0
+) -> List[float]:
     """Per-operator weights aligned to OPERATORS. Each operator is boosted by how
     many of its keywords appear in the patch, so the touched malformation family
     dominates selection while every operator keeps a floor probability."""

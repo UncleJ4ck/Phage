@@ -95,8 +95,12 @@ def malformations(raw: bytes) -> frozenset:
     # body-side chunk-obfuscation families (heuristic, for MAP-Elites spreading)
     if re.search(rb"(?m)^[0-9a-fA-F]+;", body):
         tags.add("chunk_ext")
-    if (re.search(rb"(?m)^0[0-9a-fA-F]", body) or re.search(rb"(?m)^[0-9a-fA-F]+[ \t]", body)
-            or re.search(rb"(?m)^0x[0-9a-fA-F]", body) or re.search(rb"(?m)^\+[0-9a-fA-F]", body)):
+    if (
+        re.search(rb"(?m)^0[0-9a-fA-F]", body)
+        or re.search(rb"(?m)^[0-9a-fA-F]+[ \t]", body)
+        or re.search(rb"(?m)^0x[0-9a-fA-F]", body)
+        or re.search(rb"(?m)^\+[0-9a-fA-F]", body)
+    ):
         tags.add("chunk_size_obf")
     if re.search(rb"0\r\n[A-Za-z][^\r\n]*:", body):
         tags.add("chunk_trailer")
@@ -108,7 +112,9 @@ def malformations(raw: bytes) -> frozenset:
         tags.add("te_and_cl")
     for line in head.split(b"\r\n"):
         ll = line.lower()
-        if ll.startswith(b" transfer-encoding") or ll.startswith(b"\ttransfer-encoding"):
+        if ll.startswith(b" transfer-encoding") or ll.startswith(
+            b"\ttransfer-encoding"
+        ):
             tags.add("te_fold")
         if ll.startswith(b"transfer-encoding") and (b":\t" in ll or b": \t" in ll):
             tags.add("te_ws")
@@ -147,7 +153,14 @@ def malformation_descriptor(g: Genome) -> tuple:
         where = "reqline"
     elif tags & {"head_bare_lf", "head_bare_cr", "ws_colon", "obs_fold"}:
         where = "head_line"
-    elif tags & {"bare_lf", "bare_cr", "double_cr", "chunk_ext", "chunk_size_obf", "chunk_trailer"}:
+    elif tags & {
+        "bare_lf",
+        "bare_cr",
+        "double_cr",
+        "chunk_ext",
+        "chunk_size_obf",
+        "chunk_trailer",
+    }:
         where = "body"
     elif tags:
         where = "headers"
