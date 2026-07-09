@@ -19,6 +19,7 @@ from phage.evo import genome as G
 from phage.evo.driver import drive
 
 PORT = int(sys.argv[1])
+SNI = sys.argv[3] if len(sys.argv) > 3 else "lab"
 TAP = sys.argv[2]
 
 
@@ -30,7 +31,7 @@ def size(p):
 
 
 async def _fire(genome):
-    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN, server_name=SNI)
     cfg.verify_mode = ssl.CERT_NONE
     async with connect("127.0.0.1", PORT, configuration=cfg) as client:
         http = H3Connection(client._quic)

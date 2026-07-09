@@ -21,6 +21,7 @@ from phage.evo.driver import drive
 
 PORT = int(sys.argv[1])
 TAP = sys.argv[2]
+SNI = sys.argv[3] if len(sys.argv) > 3 else "lab"  # name-routed proxies (OLS) need SNI
 CRLF = b"\r\n"
 
 
@@ -32,7 +33,7 @@ def size(p):
 
 
 async def _fire(genome, raw):
-    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN, server_name=SNI)
     cfg.verify_mode = ssl.CERT_NONE
     async with connect("127.0.0.1", PORT, configuration=cfg) as client:
         http = H3Connection(client._quic)

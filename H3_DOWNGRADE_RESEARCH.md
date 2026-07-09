@@ -314,10 +314,17 @@ the backend.
   faithfully (te=chunked, 1 request), rejects trailers, rejects CL<data and CL:0+body, and
   rejects all synthesis primitives (standalone-END_STREAM, CRLF-in-value, :path request-line
   injection, dup :path, H2.TE) - 0 forwarded to the backend in every case.
-- H3-specific mux (standalone-FIN, raw-QPACK synthesis): NOT tested. aioquic (Phage's H3
-  client) cannot complete the QUIC handshake with lsquic (ConnectionError, likely OLS's
-  8-way SO_REUSEPORT return path); curl-h3 works but cannot emit malformed QPACK. So the
-  lsquic H3 mux is the one reachable surface still unmeasured. Honest gap, blocker named.
+- H3-specific mux (standalone-FIN, raw-QPACK synthesis): now TESTED, clean negative. The
+  aioquic ConnectionError was root-caused via qlog to a TLS `internal_error` (transport
+  error 336 = CRYPTO_ERROR + TLS alert 80): OLS is name-routed to vhost `lab` and aioquic
+  was sending SNI `127.0.0.1`, so BoringSSL could not select the cert/vhost (the same SNI
+  class as the sozu H2 fix). Fix: set `server_name="lab"` on the QuicConfiguration (added as
+  the SNI arg to h3_panel/reframe_probe). With it the H3 handshake completes and a benign
+  raw-QPACK GET reaches the backend. Firing the full H3 battery at the lsquic mux: all 8
+  primitives (CRLF/dup-pseudo/NUL/LF field injection, :path request-line injection,
+  standalone-FIN CL:10, body-length-lie) forward 0 bytes. lsquic validates QPACK field
+  content and CL/body before the H1 downgrade. The least-audited major QUIC stack is
+  defended too.
 
 ## Round verdict (2026-07-09)
 Tested H3->H1 and/or H2->H1 across HAProxy, nginx, Caddy, Envoy, ATS, sozu, OpenLiteSpeed
@@ -327,5 +334,6 @@ oracle AND a Node/llhttp chunked+split oracle, both positive-controlled). Result
 request-smuggling desync. Every stack validates field content and CL/body before or during
 the H1 downgrade and sizes chunks faithfully. One genuine but non-security ATS bug (H2
 trailer folded into the H1 body with an `HTTP/1.0 0 ` prefix). The only live desync remains
-the already-patched HAProxy H3-mux standalone-FIN (CVE-2026-33555). Unmeasured: the lsquic
-H3 mux (aioquic interop), and response-side / cross-hop (chain-emergent) surfaces.
+the already-patched HAProxy H3-mux standalone-FIN (CVE-2026-33555). The lsquic H3 mux is now
+measured (SNI interop fixed) and clean. Unmeasured: response-side and cross-hop
+(chain-emergent) surfaces only.
