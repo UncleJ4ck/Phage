@@ -2,11 +2,11 @@
 # downgrade serializer with the raw-HPACK genes (standalone-END_STREAM, H2.CL, CRLF).
 services:
   origin:
-    image: python:3.13-slim
+    image: node:22-alpine
     working_dir: /app
-    volumes: [ "../:/app:ro", "./logs:/logs" ]
-    environment: { CONN_LOG: /logs/conn_bk.log }
-    command: python /app/lab_ats_h2/conn_bk.py
+    volumes: [ "./chunk_bk.js:/app/chunk_bk.js:ro", "./logs:/logs" ]
+    environment: { CHUNK_LOG: /logs/chunk_bk.log }
+    command: node /app/chunk_bk.js
     networks: { a2: { ipv4_address: 172.42.0.10 } }
   tap_ah:
     image: python:3.12-slim

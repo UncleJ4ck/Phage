@@ -257,3 +257,34 @@ envoy.local.yaml (the committed envoy.yaml stays a secret-free filename template
 field content and CL/body at the H3 layer before the H1 downgrade. The H3->H1 synthesis
 and CL-lie surface is class-wide-defended on current builds. The only live desync remains
 the already-patched HAProxy H3-mux standalone-FIN (CVE-2026-33555). No new CVE.
+
+## Chunked re-framing oracle + the ATS trailer bug (2026-07-09)
+The CL-only conn_bk backend CANNOT frame a chunked forwarded request (it read Envoy's
+chunk-size lines `0` and `8` as request lines). So every prior "chunked negative" was a
+false-clean. Built chunk_bk.js: a Node/llhttp backend that parses CL and chunked correctly
+and logs one REQ per framed request; a smuggle = it frames >1 request from one forwarded
+stream. Oracle positive control PASSES: a pipelined `POST /pc1`+`GET /pc2` sent straight to
+it frames 2 requests, so its "1 request" verdicts are real negatives.
+
+Body re-framing map (valid POST, then a no-content-length streaming body):
+- nginx / Caddy / HAProxy: buffer the body and emit Content-Length. No chunked path.
+- Envoy 1.31 and ATS 10.1.2: emit transfer-encoding: chunked for a no-CL body.
+
+Envoy chunked, tested against llhttp: faithful. Body content stays opaque inside correctly
+sized chunks (a body that looks like `0\r\n\r\nGET /...` frames as 1 request), H3 trailers
+are silently dropped, and trailers carrying Transfer-Encoding or CRLF are RST at the mux.
+Clean negative, now measured with the right oracle.
+
+ATS 10.1.2 chunked, tested against llhttp: FOUND a genuine ATS bug (not a smuggle). ATS
+mis-serializes an H2 trailer into the H1 chunked BODY with a garbage `HTTP/1.0 0 ` prefix,
+e.g. an H2 trailer `x-trailer: present` on a 2-byte body becomes one chunk
+`25\r\nHIHTTP/1.0 0 \r\nx-trailer: present\r\n\r\n\r\n0\r\n\r\n`. The trailer is promoted to
+request body (a type confusion; `HTTP/1.0 0 ` is an HTTPHdr serialized as a status line).
+NOT a request smuggle: the chunk size is always ATS-computed to wrap the whole folded
+trailer, so embedded chunk terminators / chunk-size lines / bare-LF / NUL / 4KB values /
+TE:chunked / CL:0 trailers all stay opaque - llhttp frames exactly 1 request in every case
+(oracle validated). Impact is a correctness bug plus a possible trailer-vs-body inspection
+mismatch (content placed in an H2 trailer reaches the backend as body); it is not a
+front/back framing desync. Worth an upstream ATS report, not a CVE. Still open: the
+response-side of the same trailer type confusion (server->client), and sozu(kawa) chunked
+re-framing (untested with the llhttp oracle).
