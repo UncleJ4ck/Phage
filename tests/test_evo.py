@@ -241,6 +241,29 @@ class TestNewPrimitiveGenes(unittest.TestCase):
         ]
         self.assertEqual(len(cls), 2)
 
+    def test_bare_lf_chunk_gene_can_emit_cve_trigger(self):
+        # The operator must be able to represent a bare-LF chunk-DATA terminator
+        # (`<hex>\r\n<data>\n0`), the CVE-2025-65114 shape. A search that cannot
+        # represent the answer never finds it.
+        import re
+
+        from phage.evo.reference import render_h1
+
+        adds_te = False
+        emits_trigger = False
+        for seed in range(100):
+            g = G._mut_bare_lf_chunk(G.seed_post(body=b"AAAA"), random.Random(seed))
+            adds_te = adds_te or any(
+                isinstance(o, G.Headers)
+                and any(k.lower() == b"transfer-encoding" for k, _ in o.fields)
+                for o in g
+            )
+            body = render_h1(g).split(b"\r\n\r\n", 1)[1]
+            if re.search(rb"^[0-9a-f]+\r\n[A-Z]+\n0", body):
+                emits_trigger = True
+        self.assertTrue(adds_te, "operator must ensure transfer-encoding: chunked")
+        self.assertTrue(emits_trigger, "operator must be able to emit the CVE trigger")
+
     def test_dup_cl_with_smuggle_desyncs_offline(self):
         # CL.CL: second CL is 0, backend reads 0 body -> parses the smuggled request.
         from phage.evo.reference import render_h1
@@ -940,9 +963,13 @@ class TestRawH3Frames(unittest.TestCase):
         kinds = [c[0] for c in rec.calls]
         self.assertIn("raw", kinds)
         self.assertNotIn("http_data", kinds)  # send_data (which normalizes CL) not used
-        raw_call = next(c for c in rec.calls if c[0] == "raw")
-        self.assertEqual(raw_call[1], b"\x00\x02XY")  # DATA frame: type 0, len 2, body
-        self.assertTrue(raw_call[2])
+        raw_calls = [c for c in rec.calls if c[0] == "raw"]
+        # raw mode hand-builds BOTH frames: a QPACK HEADERS frame (type 0x01) then
+        # the DATA frame (type 0x00, len 2, body) with the FIN.
+        data_call = next(c for c in raw_calls if c[1] == b"\x00\x02XY")
+        self.assertTrue(data_call[2])
+        self.assertTrue(any(c[1].startswith(b"\x01") for c in raw_calls))  # HEADERS frame
+        self.assertNotIn("h", kinds)  # aioquic send_headers bypassed in raw mode
 
 
 class TestCrashAndReplay(unittest.TestCase):
@@ -1486,6 +1513,515 @@ class TestReviewFindingsRegression(unittest.TestCase):
 
         # Must not raise ZeroDivisionError on the 0.0 draw.
         self.assertGreaterEqual(G._levy_int(Zero()), 1)
+
+
+class TestPhageUpgrades(unittest.TestCase):
+    """Field-lesson features: calibration gate, stability gate, byte minimizer,
+    differential + disagreement oracles, malformation descriptor, patch-guided
+    weights, stigmergy prior."""
+
+    def _chunked(self, body: bytes):
+        return [
+            G.Headers(
+                ((b":method", b"POST"), (b":path", b"/"), (b"transfer-encoding", b"chunked"))
+            ),
+            G.Data(body, end_stream=True),
+        ]
+
+    def test_calibrate_passes_when_oracle_separates_pos_neg(self):
+        from phage.evo.gates import calibrate
+
+        def run_case(g):
+            return Observation(2) if g == "pos" else Observation(1)
+
+        calibrate(run_case, "pos", "neg")  # must not raise
+
+    def test_calibrate_raises_on_blind_oracle(self):
+        from phage.evo.gates import CalibrationError, calibrate
+
+        # false negative: oracle never fires, even on the known positive
+        with self.assertRaises(CalibrationError):
+            calibrate(lambda g: Observation(1), "pos", "neg")
+
+    def test_calibrate_raises_when_oracle_fires_on_negative(self):
+        from phage.evo.gates import CalibrationError, calibrate
+
+        with self.assertRaises(CalibrationError):
+            calibrate(lambda g: Observation(2), "pos", "neg")
+
+    def test_stabilized_demotes_flaky_finding(self):
+        from phage.evo.gates import stabilized
+
+        calls = {"n": 0}
+
+        def flaky(g):
+            calls["n"] += 1
+            return Observation(2) if calls["n"] == 1 else Observation(1)  # fires once
+
+        wrapped = stabilized(flaky, n=3)
+        self.assertEqual(wrapped("g").request_count, 1)  # not reproducible -> demoted
+
+    def test_stabilized_keeps_stable_finding(self):
+        from phage.evo.gates import stabilized
+
+        wrapped = stabilized(lambda g: Observation(2), n=3)
+        self.assertEqual(wrapped("g").request_count, 2)
+
+    def test_ddmin_bytes_shrinks_to_minimal_trigger(self):
+        from phage.evo.minimize import ddmin_bytes
+
+        raw = b"junkjunkX\n0junktail"
+        out = ddmin_bytes(raw, lambda b: b"X\n0" in b)
+        self.assertIn(b"X\n0", out)
+        self.assertLess(len(out), len(raw))
+
+    def test_version_diff_run_case_hits_only_on_flip(self):
+        from phage.evo.differential import make_version_diff_run_case
+        from phage.evo.reference import render_h1
+
+        bad = self._chunked(b"1\r\nX\n0\r\n\r\n")
+        good = self._chunked(b"1\r\nX\r\n0\r\n\r\n")
+        bad_raw = render_h1(bad)
+
+        def vuln(raw):
+            return True  # vuln accepts everything
+
+        def patched(raw):
+            return raw != bad_raw  # patched rejects only the malformed one
+
+        rc = make_version_diff_run_case(vuln, patched)
+        self.assertEqual(rc(bad).request_count, 2)  # accept-vuln + reject-patched
+        self.assertEqual(rc(good).request_count, 1)  # accepted by both -> no hit
+
+    def test_version_diff_errors_on_probe_failure(self):
+        from phage.evo.differential import make_version_diff_run_case
+
+        rc = make_version_diff_run_case(lambda r: None, lambda r: True)
+        self.assertTrue(rc(self._chunked(b"1\r\nX\n0\r\n\r\n")).error)
+
+    def test_disagreement_run_case_flags_count_mismatch(self):
+        from phage.evo.differential import make_disagreement_run_case
+
+        hit = make_disagreement_run_case(lambda r: 2, lambda r: 1)
+        agree = make_disagreement_run_case(lambda r: 1, lambda r: 1)
+        self.assertGreaterEqual(hit(self._chunked(b"x")).request_count, 2)
+        self.assertEqual(agree(self._chunked(b"x")).request_count, 1)
+
+    def test_malformation_descriptor_classifies_bare_lf(self):
+        from phage.evo.differential import malformation_descriptor, malformations
+        from phage.evo.reference import render_h1
+
+        bare = render_h1(self._chunked(b"1\r\nX\n0\r\n\r\n"))
+        clean = render_h1(self._chunked(b"1\r\nX\r\n0\r\n\r\n"))
+        self.assertIn("bare_lf", malformations(bare))
+        self.assertNotIn("bare_lf", malformations(clean))
+        self.assertEqual(malformation_descriptor(self._chunked(b"1\r\nX\n0\r\n\r\n"))[1], "body")
+
+    def test_h2_hpack_and_frame_encoding(self):
+        # HPACK literal encoding must carry ANY bytes (incl CRLF/dup-pseudo) and
+        # decode back; the genome must map to the right H2 frames.
+        from phage.evo import driver_h2 as H2
+
+        try:
+            from hpack import Decoder
+        except ImportError:
+            self.skipTest("hpack lib not installed")
+        for fields in [
+            [(b":method", b"GET"), (b":path", b"/")],
+            [(b":path", b"/x"), (b"x-inj", b"a\r\nEvil: 1")],   # CRLF survives HPACK
+            [(b":path", b"/a"), (b":path", b"/b")],             # dup pseudo
+        ]:
+            got = [(k.encode() if isinstance(k, str) else k,
+                    v.encode() if isinstance(v, str) else v)
+                   for k, v in Decoder().decode(H2.hpack_encode(fields))]
+            self.assertEqual(got, fields)
+        # frame header: 3-byte length + type + flags + 4-byte stream id
+        f = H2.h2_frame(H2.FT_DATA, H2.FLAG_END_STREAM, 1, b"XY")
+        self.assertEqual(f[:3], b"\x00\x00\x02")
+        self.assertEqual(f[3], H2.FT_DATA)
+        self.assertEqual(f[4], H2.FLAG_END_STREAM)
+        self.assertEqual(f[9:], b"XY")
+        # genome -> frames: Headers(end_stream) -> HEADERS with END_STREAM; Fin ->
+        # empty DATA with END_STREAM (the H2 standalone-FIN); Reset -> RST_STREAM.
+        g = [G.Headers(((b":method", b"POST"), (b"content-length", b"10")), end_stream=True)]
+        blob = H2.drive_h2_bytes(g)
+        self.assertEqual(blob[3], H2.FT_HEADERS)
+        self.assertTrue(blob[4] & H2.FLAG_END_STREAM)
+        fin_blob = H2.drive_h2_bytes([G.Fin()])
+        self.assertEqual(fin_blob[3], H2.FT_DATA)
+        self.assertTrue(fin_blob[4] & H2.FLAG_END_STREAM)
+        self.assertEqual(int.from_bytes(fin_blob[:3], "big"), 0)  # empty DATA
+        self.assertEqual(H2.drive_h2_bytes([G.Reset(8)])[3], H2.FT_RST)
+
+    def test_head_line_operators_emit_exact_bytes_and_detect(self):
+        # Each head-side operator must render the exact malformed bytes AND be seen
+        # by malformations(), or MAP-Elites can neither reach nor spread the class.
+        from phage.evo.differential import malformations
+        from phage.evo.reference import render_h1
+
+        base = G.seed_post(body=b"AAAA")
+        cases = [
+            (G._mut_ws_before_colon, (b"transfer-encoding : chunked", b"content-length : 0"), "ws_colon"),
+            (G._mut_bare_lf_header, (b"x-pad: 1\nTransfer-Encoding: chunked", b"x-pad: 1\nContent-Length: 0"), "head_bare_lf"),
+            (G._mut_bare_cr_header, (b"x-pad: 1\rTransfer-Encoding: chunked", b"x-pad: 1\rContent-Length: 0"), "head_bare_cr"),
+            (G._mut_obs_fold, (b"transfer-encoding: \r\n chunked",), "obs_fold"),
+            (G._mut_absolute_form, (b"POST http://lab/ HTTP/1.1",), "abs_form"),
+            (G._mut_rl_space, (b"POST  / HTTP/1.1", b"POST\t / HTTP/1.1"), "rl_ws"),
+        ]
+        for op, variants, tag in cases:
+            for seed in range(8):  # cover both rng.choice branches
+                raw = render_h1(op(base, random.Random(seed)))
+                hits = [v for v in variants if v in raw]
+                self.assertEqual(len(hits), 1, f"{op.__name__} seed{seed}: {raw!r}")
+                self.assertIn(tag, malformations(raw), f"{op.__name__} seed{seed}")
+                self.assertEqual(raw.count(b"\r\n\r\n"), 1, f"{op.__name__} split")
+                # determinism
+                self.assertEqual(render_h1(op(base, random.Random(seed))), raw)
+
+    def test_head_line_operator_composes_with_framing_conflict(self):
+        # The genome stays structured (Headers ops survive), so a head-line
+        # malformation composes WITH a TE/CL conflict, not a terminal Raw blob.
+        from phage.evo.differential import malformations
+        from phage.evo.reference import render_h1
+
+        rng = random.Random(0)
+        g = G._mut_te_chunked(G.seed_post(body=b"AAAA"), rng)
+        g = G._mut_bare_lf_header(g, rng)
+        g = G._mut_ws_before_colon(g, rng)
+        self.assertTrue([o for o in g if isinstance(o, G.Headers)])
+        tags = malformations(render_h1(g))
+        self.assertTrue(tags & {"head_bare_lf", "ws_colon"})
+        self.assertTrue(tags & {"te_and_cl", "dup_cl"})
+
+    def test_chunk_obfuscation_operators_emit_and_detect(self):
+        # Chunk-side genes must ensure TE, emit the obfuscation, and be detected, or
+        # the body/chunk vein (the ATS-forwarded raw material) is unreachable.
+        import re as _re
+        from phage.evo.differential import malformations
+        from phage.evo.reference import render_h1
+
+        base = G.seed_post(body=b"AAAA")
+        specs = [
+            (G._mut_chunk_ext, "chunk_ext", lambda b: _re.search(rb"(?m)^[0-9a-fA-F]+;", b)),
+            (G._mut_chunk_size_obfuscate, "chunk_size_obf",
+             lambda b: (_re.search(rb"(?m)^0[0-9a-fA-F]", b) or _re.search(rb"(?m)^[0-9a-fA-F]+[ \t]", b)
+                        or b.startswith(b"0x") or b.startswith(b"+"))),
+            (G._mut_chunk_trailer, "chunk_trailer", lambda b: _re.search(rb"0\r\n[A-Za-z][^\r\n]*:", b)),
+        ]
+        for op, tag, shape in specs:
+            for seed in range(12):
+                raw = render_h1(op(base, random.Random(seed)))
+                body = raw.split(b"\r\n\r\n", 1)[1]
+                self.assertIn(b"transfer-encoding: chunked", raw.lower(), op.__name__)
+                self.assertTrue(shape(body), f"{op.__name__} s{seed}: {body!r}")
+                self.assertIn(tag, malformations(raw), f"{op.__name__} s{seed}")
+                self.assertEqual(render_h1(op(base, random.Random(seed))), raw)
+
+    def test_chunk_gene_composes_with_mint(self):
+        # mint (bare-LF TE) + chunk-ext stays structured, both tags present.
+        from phage.evo.differential import malformations
+        from phage.evo.reference import render_h1
+
+        rng = random.Random(3)
+        g = G._mut_chunk_ext(G._mut_bare_lf_header(G.seed_post(body=b"AAAA"), rng), rng)
+        self.assertTrue([o for o in g if isinstance(o, G.Headers)])
+        tags = malformations(render_h1(g))
+        self.assertIn("chunk_ext", tags)
+        self.assertIn("head_bare_lf", tags)
+
+    def test_h3_quic_state_genes_structure_and_determinism(self):
+        # The QUIC-state genes (CVE-2026-33555 class) must build the exact frame
+        # sequence a vulnerable H3->H1 downgrade mis-frames: declared CL, then a
+        # terminator that delivers fewer bytes.
+        base = G.seed_post(body=b"AAAA")
+        for seed in range(8):
+            sf = G._mut_standalone_fin(base, random.Random(seed))
+            # ends with a bare FIN, one HEADERS carries content-length, no DATA body
+            self.assertIsInstance(sf[-1], G.Fin)
+            self.assertFalse([o for o in sf if isinstance(o, G.Data)])
+            cl = G.declared_content_length(sf)
+            self.assertIsNotNone(cl)
+            self.assertGreater(cl, 0)
+            # determinism
+            self.assertEqual(sf, G._mut_standalone_fin(base, random.Random(seed)))
+
+            bl = G._mut_body_length_lie(base, random.Random(seed))
+            self.assertIsInstance(bl[-1], G.Fin)
+            declared = G.declared_content_length(bl)
+            delivered = sum(len(o.payload) for o in bl if isinstance(o, G.Data))
+            self.assertLess(delivered, declared)  # the lie: delivered < declared
+            self.assertEqual(bl, G._mut_body_length_lie(base, random.Random(seed)))
+
+    def test_h3_genes_do_not_break_h1_layer(self):
+        # Fin/H3 ops must be ignored by the H1 render + descriptors, never crash.
+        from phage.evo.differential import malformation_descriptor, malformations
+        from phage.evo.reference import render_h1
+
+        for seed in range(20):
+            rng = random.Random(seed)
+            g = G.seed_post(body=b"AAAA")
+            for name in G.H3_OPERATOR_NAMES:
+                g = getattr(G, name)(g, rng)
+            raw = render_h1(g)          # must not raise
+            self.assertIsInstance(raw, bytes)
+            G.descriptor(g); malformation_descriptor(g); malformations(raw)
+            # Fin never renders into H1 bytes
+            self.assertNotIn(b"Fin", raw)
+
+    def test_patch_guided_weights_boost_matching_family(self):
+        from phage.evo.patch_guided import patch_guided_weights
+
+        w = patch_guided_weights("Fix prev_is_cr flag handling in chunked encoding parser")
+        self.assertEqual(len(w), len(G.OPERATORS))
+        names = [op.__name__ for op in G.OPERATORS]
+        bare = w[names.index("_mut_bare_lf_chunk")]
+        method = w[names.index("_mut_http_method")]
+        self.assertGreater(bare, method)  # chunk-family boosted over an unrelated op
+
+    def test_stigmergy_prior_biases_first_pick(self):
+        from phage.evo.stigmergy import StigmergyMutator
+
+        n = len(G.OPERATORS)
+        prior = [1.0] * n
+        prior[n - 1] = 100.0  # heavily favour the last operator
+        m = StigmergyMutator(n, prior=prior)
+        picks = [
+            __import__("phage.evo.genome", fromlist=["pick_operator"]).pick_operator(
+                random.Random(s), m._row(-1)
+            )
+            for s in range(200)
+        ]
+        # dominates the start trail (proportional, robust to operator count: the
+        # 100:1 prior gives ~100/(100+n-1) share, comfortably a majority)
+        self.assertGreater(picks.count(n - 1), 0.6 * len(picks))
+
+    def test_stigmergy_prior_length_mismatch_raises(self):
+        from phage.evo.stigmergy import StigmergyMutator
+
+        with self.assertRaises(ValueError):
+            StigmergyMutator(len(G.OPERATORS), prior=[1.0, 2.0])
+
+    def test_search_aborts_on_failed_calibration(self):
+        from phage.evo.gates import CalibrationError
+        from phage.evo.runner import search
+
+        # oracle blind to the positive -> calibration must abort the search
+        pos = self._chunked(b"1\r\nX\n0\r\n\r\n")
+        neg = G.seed_post(body=b"AAAA")
+        with self.assertRaises(CalibrationError):
+            search(
+                lambda g: Observation(1),
+                random.Random(0),
+                generations=5,
+                calibration=(pos, neg),
+            )
+
+    def test_read_new_records_survives_partial_and_garbage_lines(self):
+        # Regression: one malformed/partial log line must not abort the run.
+        import os
+        import tempfile
+
+        from phage.evo.runner import read_new_records
+
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "echo.jsonl")
+            with open(p, "w") as f:
+                f.write('{"n": 2}\n')
+                f.write("not json at all\n")
+                f.write('{"n": 1, "bound')  # partial write, no newline
+            recs, off = read_new_records(p, 0)
+            self.assertEqual([r["n"] for r in recs], [2])  # good line kept, garbage skipped
+            self.assertLess(off, os.path.getsize(p))  # partial tail held back
+            # complete the partial line; the next read must pick it up
+            with open(p, "a") as f:
+                f.write('aries": []}\n')
+            recs2, _ = read_new_records(p, off)
+            self.assertEqual([r["n"] for r in recs2], [1])
+
+    def test_coevolve_hardens_defender(self):
+        # Regression: with a defender, findings must harden it (Red Queen actually
+        # starts). Before the fix the defender stayed empty forever.
+        from phage.evo.archive import Archive
+        from phage.evo.coevolution import Defender
+        from phage.evo.evolve import evolve
+
+        def dup_cl_count(g):
+            return sum(
+                1
+                for o in g
+                if isinstance(o, G.Headers)
+                for k, _ in o.fields
+                if k.lower() == b"content-length"
+            )
+
+        def evaluator(g):
+            # flag any genome carrying a duplicate content-length as a desync
+            verdict = Verdict.DESYNC if dup_cl_count(g) >= 2 else Verdict.CLEAN
+            return verdict, G.descriptor(g)
+
+        defender = Defender()
+        self.assertEqual(defender.active, [])
+        seed = G._mut_dup_content_length(G.seed_post(body=b"AAAA"), random.Random(0))
+        evolve(seed, evaluator, random.Random(1), generations=30, defender=defender)
+        self.assertTrue(defender.active, "coevolve never hardened the defender")
+
+    def test_make_evaluator_revalidate_zero_no_crash(self):
+        from phage.evo.runner import make_evaluator
+
+        ev = make_evaluator(lambda g: Observation(1), G.seed_post(), revalidate_every=0)
+        ev(G.seed_post())
+        ev(G.seed_post())  # 2nd call would ZeroDivision without the guard
+
+    def test_labkit_truncate_and_isolated_log(self):
+        import os
+        import tempfile
+
+        from phage.evo.labkit import isolated_log_path, truncate_and_verify
+
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "log")
+            with open(p, "w") as f:
+                f.write("stale lines\n")
+            truncate_and_verify(p)  # must clear and confirm empty
+            self.assertEqual(os.path.getsize(p), 0)
+            with isolated_log_path(d, "seed1") as ip:
+                self.assertTrue(os.path.exists(ip))
+                self.assertIn("seed1", ip)
+            self.assertFalse(os.path.exists(ip))  # removed on exit
+
+    def test_search_with_all_upgrades_runs_offline(self):
+        import re
+
+        from phage.evo.differential import malformation_descriptor
+        from phage.evo.patch_guided import patch_guided_weights
+        from phage.evo.reference import render_h1
+        from phage.evo.runner import search
+
+        trig = re.compile(rb"[0-9a-f]+\r\n[A-Z]+\n0")
+
+        def offline(g):
+            # deterministic stand-in for "vuln accepts a bare-LF chunk terminator"
+            body = render_h1(g).split(b"\r\n\r\n", 1)[1] if b"\r\n\r\n" in render_h1(g) else b""
+            return Observation(2) if trig.search(body) else Observation(1)
+
+        pos = self._chunked(b"1\r\nX\n0\r\n\r\n")
+        neg = G.seed_post(body=b"AAAA")
+        archive, hits, minimized = search(
+            offline,
+            random.Random(1),
+            generations=80,  # pool grew to 25 operators; budget scales with it (6/6 seeds hit)
+            descriptor_fn=malformation_descriptor,
+            operator_weights=patch_guided_weights("chunked prev_is_cr crlf"),
+            calibration=(pos, neg),
+            stabilize=2,
+        )
+        self.assertTrue(len(archive) > 0)
+        self.assertTrue(hits)  # the bare-LF operator + biased search finds triggers
+
+
+class TestChainOracle(unittest.TestCase):
+    """Chain-emergent (transitive) desync oracle: the finding is a chain smuggle
+    where every adjacent pair, fed the raw vector, is clean."""
+
+    def _g(self, marker=b""):
+        return G.seed_post(body=b"AAAA" + marker)
+
+    def test_emergent_is_a_finding(self):
+        from phage.evo.chain import make_chain_run_case, result_kind
+
+        rc = make_chain_run_case(lambda raw: (1, 2), [lambda raw: (1, 1), lambda raw: (1, 1)])
+        o = rc(self._g())
+        self.assertEqual(o.request_count, 2)          # DESYNC signal
+        self.assertEqual(result_kind(o), "emergent")
+
+    def test_pairwise_only_is_filtered(self):
+        from phage.evo.chain import make_chain_run_case, result_kind
+
+        # chain smuggles (1->2) BUT pair 0 desyncs alone -> ordinary pairwise, not ours
+        rc = make_chain_run_case(lambda raw: (1, 2), [lambda raw: (1, 2), lambda raw: (1, 1)])
+        o = rc(self._g())
+        self.assertEqual(o.request_count, 1)          # not a finding
+        self.assertEqual(result_kind(o), "pairwise")
+
+    def test_benign_chain_clean(self):
+        from phage.evo.chain import make_chain_run_case, result_kind
+
+        rc = make_chain_run_case(lambda raw: (1, 1), [lambda raw: (1, 1)])
+        o = rc(self._g())
+        self.assertEqual(o.request_count, 1)
+        self.assertEqual(result_kind(o), "clean")
+
+    def test_chain_probe_error(self):
+        from phage.evo.chain import make_chain_run_case
+
+        rc = make_chain_run_case(lambda raw: None, [lambda raw: (1, 1)])
+        self.assertTrue(rc(self._g()).error)
+
+    def test_empty_pair_probes_rejected(self):
+        # the emergent negative control cannot be empty (review HIGH #1)
+        from phage.evo.chain import make_chain_run_case
+
+        with self.assertRaises(ValueError):
+            make_chain_run_case(lambda raw: (1, 2), [])
+
+    def test_head_underread_cannot_manufacture_finding(self):
+        # F1 / review #2: a mis-measured head_acked < expected must NOT be a finding
+        from phage.evo.chain import make_chain_run_case, result_kind
+
+        # head under-read to 0, tail = 1 = expected -> NOT a smuggle
+        rc = make_chain_run_case(lambda raw: (0, 1), [lambda raw: (1, 1)], expected=1)
+        o = rc(self._g())
+        self.assertEqual(o.request_count, 1)
+        self.assertEqual(result_kind(o), "clean")
+
+    def test_pair_probe_error_short_circuits(self):
+        from phage.evo.chain import make_chain_run_case
+
+        rc = make_chain_run_case(lambda raw: (1, 2), [lambda raw: None])
+        self.assertTrue(rc(self._g()).error)
+
+    def test_calibrate_fires_on_emergent_silent_on_benign(self):
+        from phage.evo.chain import make_chain_run_case
+        from phage.evo.gates import calibrate
+
+        pos, neg = self._g(b"EMERGENT"), self._g(b"BENIGN")
+
+        def chain_probe(raw):
+            return (1, 2) if b"EMERGENT" in raw else (1, 1)
+
+        rc = make_chain_run_case(chain_probe, [lambda raw: (1, 1), lambda raw: (1, 1)])
+        calibrate(rc, pos, neg)  # must not raise
+
+    def test_calibrate_refuses_pairwise_as_emergent_positive(self):
+        # If the "known positive" is actually a pairwise-only desync, the gate must
+        # NOT call it a finding -> calibrate raises (proves emergent != pairwise).
+        from phage.evo.chain import make_chain_run_case
+        from phage.evo.gates import CalibrationError, calibrate
+
+        pos, neg = self._g(b"PAIRWISE"), self._g(b"BENIGN")
+
+        def chain_probe(raw):
+            return (1, 2) if b"PAIRWISE" in raw else (1, 1)
+
+        def pair0(raw):
+            return (1, 2) if b"PAIRWISE" in raw else (1, 1)  # pair desyncs alone
+
+        rc = make_chain_run_case(chain_probe, [pair0, lambda raw: (1, 1)])
+        with self.assertRaises(CalibrationError):
+            calibrate(rc, pos, neg)
+
+    def test_stabilized_demotes_flaky_emergent(self):
+        from phage.evo.chain import make_chain_run_case
+        from phage.evo.gates import stabilized
+
+        calls = {"n": 0}
+
+        def chain_probe(raw):
+            calls["n"] += 1
+            return (1, 2) if calls["n"] == 1 else (1, 1)  # emergent once, then clean
+
+        rc = stabilized(make_chain_run_case(chain_probe, [lambda raw: (1, 1)]), n=3)
+        self.assertEqual(rc(self._g()).request_count, 1)  # not reproducible -> demoted
 
 
 if __name__ == "__main__":

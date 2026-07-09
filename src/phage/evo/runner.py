@@ -7,7 +7,7 @@ each hit. The aioquic round-trip in _live_run_case/main is lab-only."""
 import json
 import os
 import random
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .archive import Archive
 from .coevolution import Defender
@@ -32,8 +32,24 @@ def read_new_records(path: str, offset: int) -> Tuple[List[dict], int]:
     with open(path, encoding="utf-8") as f:
         f.seek(offset)
         data = f.read()
-        new_offset = f.tell()
-    records = [json.loads(line) for line in data.splitlines() if line.strip()]
+    # A concurrent writer (the backend appends under a lock; this reader seeks by
+    # offset without one) can leave the final line partially written. Hold back a
+    # non-newline-terminated tail so it is re-read complete next time, and skip any
+    # line that still fails to parse. One malformed line must not abort the search.
+    held = 0
+    if data and not data.endswith("\n"):
+        cut = data.rfind("\n") + 1
+        held = len(data[cut:].encode("utf-8"))
+        data = data[:cut]
+    new_offset = offset + len(data.encode("utf-8"))
+    records = []
+    for line in data.splitlines():
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except (json.JSONDecodeError, ValueError):
+            continue
     return records, new_offset
 
 
@@ -50,6 +66,7 @@ def make_evaluator(
     baseline: Genome,
     expected: int = 1,
     revalidate_every: int = 20,
+    descriptor_fn: Callable[[Genome], tuple] = descriptor,
 ) -> Callable[[Genome], Tuple[Verdict, tuple]]:
     """Score each genome against the baseline (the negative control).
 
@@ -57,9 +74,12 @@ def make_evaluator(
     re-measured every `revalidate_every` calls rather than on every genome.
 
     The behavior descriptor is response-derived: it appends what the backend
-    actually did (request count, latency bucket) to the genome's structural
-    descriptor, so MAP-Elites cells spread across outcomes, not just inputs.
+    actually did (request count, latency bucket) to `descriptor_fn(genome)`, so
+    MAP-Elites cells spread across outcomes, not just inputs. Pass
+    `malformation_descriptor` for Differential MAP-Elites (cells over
+    malformation-type x position).
     """
+    revalidate_every = max(1, revalidate_every)  # 0 would ZeroDivision below
     state: Dict[str, object] = {"n": 0, "base": None}
 
     def evaluator(genome: Genome) -> Tuple[Verdict, tuple]:
@@ -68,7 +88,7 @@ def make_evaluator(
         state["n"] = int(state["n"]) + 1
         test_obs = run_case(genome)
         verdict = classify(expected, state["base"], test_obs)
-        d = descriptor(genome) + (
+        d = descriptor_fn(genome) + (
             test_obs.request_count,
             _latency_bucket(test_obs.latency),
         )
@@ -91,13 +111,31 @@ def search(
     neutral_drift: bool = False,
     extinction_limit: Optional[int] = None,
     coevolve: bool = False,
+    descriptor_fn: Callable[[Genome], tuple] = descriptor,
+    operator_weights: Optional[Sequence[float]] = None,
+    calibration: Optional[Tuple[Genome, Genome]] = None,
+    stabilize: int = 0,
 ) -> Tuple[Archive, List[Genome], List[Genome]]:
     """Evolve, then shrink each finding to its minimal trigger. Returns (archive,
     findings, minimized); a finding is a DESYNC or a CRASH. grammar_seeds/
     use_corpus pre-seed the population; the other keywords are evolve()'s
-    mechanisms. All default off, so the plain call is the baseline search."""
+    mechanisms. All default off, so the plain call is the baseline search.
+
+    Robustness hooks (all opt-in): `calibration=(positive, negative)` preflights the
+    oracle and aborts if it cannot tell a known bug from a benign request;
+    `stabilize=N` demotes any finding that does not reproduce on N re-fires;
+    `descriptor_fn` swaps the MAP-Elites cell key (e.g. malformation_descriptor);
+    `operator_weights` seeds the stigmergy prior (e.g. patch_guided_weights)."""
     baseline = baseline or seed_post()
-    evaluator = make_evaluator(run_case, baseline, expected)
+    if stabilize > 0:
+        from .gates import stabilized
+
+        run_case = stabilized(run_case, stabilize)
+    if calibration is not None:
+        from .gates import calibrate
+
+        calibrate(run_case, calibration[0], calibration[1])
+    evaluator = make_evaluator(run_case, baseline, expected, descriptor_fn=descriptor_fn)
     archive = Archive(k_variants=3 if neutral_drift else 1)
 
     population: List[Genome] = []
@@ -113,7 +151,10 @@ def search(
         v, d = evaluator(g)
         archive.add(d, shaped_fitness(v, g), g)
 
-    mutator = StigmergyMutator(len(OPERATORS)) if stigmergy else None
+    if stigmergy or operator_weights is not None:
+        mutator = StigmergyMutator(len(OPERATORS), prior=operator_weights)
+    else:
+        mutator = None
     defender = Defender() if coevolve else None
     archive, hits = evolve(
         baseline,

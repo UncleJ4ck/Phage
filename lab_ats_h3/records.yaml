@@ -1,0 +1,33 @@
+records:
+  diags:
+    debug:
+      enabled: 0
+  exec_thread:
+    autoconfig:
+      enabled: 1
+  accept_threads: 1
+  udp:
+    threads: 1
+  http:
+    server_ports: "8080 4436:quic:ssl"
+    send_http11_requests: 1
+    chunking_enabled: 1
+    keep_alive_enabled_in: 1
+    keep_alive_enabled_out: 1
+    insert_request_via_str: 0
+    insert_response_via_str: 0
+  reverse_proxy:
+    enabled: 1
+  url_remap:
+    remap_required: 1
+    pristine_host_hdr: 1
+  ssl:
+    server:
+      cert:
+        path: /certs
+      private_key:
+        path: /certs
+    client:
+      verify:
+        server:
+          policy: DISABLED

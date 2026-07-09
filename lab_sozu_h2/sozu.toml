@@ -1,0 +1,15 @@
+command_socket = "/tmp/sozu.sock"
+log_level = "info"
+log_target = "stdout"
+worker_count = 1
+activate_listeners = true
+[[listeners]]
+protocol = "https"
+address = "0.0.0.0:8443"
+tls_versions = ["TLS_V12", "TLS_V13"]
+[clusters]
+[clusters.C]
+protocol = "http"
+load_balancing = "ROUND_ROBIN"
+frontends = [ { address = "0.0.0.0:8443", hostname = "lab", certificate = "/certs/lab.crt", key = "/certs/lab.key", certificate_chain = "/certs/lab.crt" } ]
+backends = [ { address = "172.45.0.11:9100", backend_id = "b1" } ]

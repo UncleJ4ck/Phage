@@ -7,7 +7,7 @@ Imports no QUIC code, so the op->call mapping is unit-testable."""
 import asyncio
 from typing import Awaitable, Callable, List, Tuple
 
-from .genome import Data, Delay, Genome, Headers, Reset
+from .genome import Data, Delay, Fin, Genome, Headers, Reset, StopSending
 
 
 def _uvarint(n: int) -> bytes:
@@ -27,6 +27,40 @@ def h3_data_frame(body: bytes) -> bytes:
     return _uvarint(0x00) + _uvarint(len(body)) + body
 
 
+def _qpack_int(prefix_byte: int, prefix_bits: int, n: int) -> bytes:
+    """QPACK/HPACK prefix integer (RFC 9204 4.1.1)."""
+    mask = (1 << prefix_bits) - 1
+    if n < mask:
+        return bytes([prefix_byte | n])
+    out = bytearray([prefix_byte | mask])
+    n -= mask
+    while n >= 128:
+        out.append((n & 0x7F) | 0x80)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+def _qpack_encode(fields) -> bytes:
+    """Encode a QPACK field section as literal-field-line-with-literal-name entries
+    (RFC 9204 4.5.6), no dynamic table, no Huffman. Emits ANY field bytes verbatim,
+    so CR/LF, duplicate pseudo-headers, NUL, and request-line injection reach the
+    wire, unlike aioquic's conformant H3Connection.send_headers."""
+    body = bytearray(b"\x00\x00")  # prefix: Required Insert Count 0, S=0 Delta Base 0
+    for name, value in fields:
+        body += _qpack_int(0x20, 3, len(name)) + name   # 001 N=0 H=0, 3-bit name len
+        body += _qpack_int(0x00, 7, len(value)) + value  # H=0, 7-bit value len
+    return bytes(body)
+
+
+def h3_headers_frame(fields) -> bytes:
+    """An H3 HEADERS frame (type 0x01) with a hand-QPACK'd field section. The raw
+    H3->H1 synthesis primitive: pseudo-header and header-value bytes a conformant
+    H3 client rejects, which a downgrade may splice into the H1 request line/headers."""
+    section = _qpack_encode(fields)
+    return _uvarint(0x01) + _uvarint(len(section)) + section
+
+
 async def _drive_ops(
     http,
     quic,
@@ -43,11 +77,20 @@ async def _drive_ops(
     for idx, op in enumerate(ops):
         try:
             if isinstance(op, Headers):
-                http.send_headers(
-                    stream_id=stream_id,
-                    headers=list(op.fields),
-                    end_stream=op.end_stream,
-                )
+                if raw:
+                    # hand-QPACK the field section so malformed fields (CR/LF, dup
+                    # pseudo, request-line injection) reach the wire; aioquic's
+                    # send_headers would reject them.
+                    quic.send_stream_data(
+                        stream_id, h3_headers_frame(list(op.fields)),
+                        end_stream=op.end_stream,
+                    )
+                else:
+                    http.send_headers(
+                        stream_id=stream_id,
+                        headers=list(op.fields),
+                        end_stream=op.end_stream,
+                    )
             elif isinstance(op, Data):
                 if raw:
                     quic.send_stream_data(
@@ -57,8 +100,14 @@ async def _drive_ops(
                     http.send_data(
                         stream_id=stream_id, data=op.payload, end_stream=op.end_stream
                     )
+            elif isinstance(op, Fin):
+                # bare stream FIN: empty write, no H3 DATA frame. The standalone-FIN
+                # primitive that leaves the H3 recv buffer empty when FIN arrives.
+                quic.send_stream_data(stream_id, b"", end_stream=True)
             elif isinstance(op, Reset):
                 quic.reset_stream(stream_id, op.error_code)
+            elif isinstance(op, StopSending):
+                quic.stop_stream(stream_id, op.error_code)
             elif isinstance(op, Delay):
                 transmit()
                 if op.seconds > 0:

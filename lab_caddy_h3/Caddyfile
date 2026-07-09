@@ -1,0 +1,10 @@
+{
+	auto_https off
+	servers {
+		protocols h1 h2 h3
+	}
+}
+:4437 {
+	tls /certs/lab.crt /certs/lab.key
+	reverse_proxy http://tap_cb:9096
+}

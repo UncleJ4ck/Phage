@@ -191,6 +191,12 @@ def evolve(
             # response-derived fields (make_evaluator appends count+latency), but
             # extinct()'s protect uses descriptor(g), so both must match shape.
             hit_cells.add(descriptor(child))
+            # Red Queen: harden the defender against the classes found so far, so
+            # is_novel() above rewards only findings that bypass every rule learned
+            # from PRIOR findings. Without this the defender stays empty and the
+            # novelty bonus fires on every finding (the arms race never starts).
+            if defender is not None:
+                defender.harden(hits)
 
         if novel or finding:
             if mutator is not None:

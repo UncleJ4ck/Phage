@@ -1,0 +1,14 @@
+command_socket = "/tmp/sozu.sock"
+log_level = "info"
+log_target = "stdout"
+worker_count = 1
+activate_listeners = true
+[[listeners]]
+protocol = "http"
+address = "0.0.0.0:9200"
+[clusters]
+[clusters.C]
+protocol = "http"
+load_balancing = "ROUND_ROBIN"
+frontends = [ { address = "0.0.0.0:9200", hostname = "lab" } ]
+backends = [ { address = "172.46.0.11:9101", backend_id = "b1" } ]

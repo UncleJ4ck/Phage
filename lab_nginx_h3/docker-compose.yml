@@ -1,0 +1,26 @@
+services:
+  origin:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes: [ "../:/app:ro", "./logs:/logs" ]
+    environment: { CONN_LOG: /logs/conn_bk.log }
+    command: python /app/lab_nginx_h3/conn_bk.py
+    networks: { n3: { ipv4_address: 172.43.0.10 } }
+  tap_ne:
+    image: python:3.12-slim
+    command: python /app/tap.py
+    environment: { TAP_LISTEN: "9097", TAP_UP: "172.43.0.10:8080", TAP_LOG: "/logs/tap_ne.jsonl" }
+    volumes: [ "./tap.py:/app/tap.py:ro", "./logs:/logs" ]
+    depends_on: [origin]
+    networks: { n3: { ipv4_address: 172.43.0.11 } }
+  nginx:
+    image: nginx:1.27
+    depends_on: [tap_ne]
+    ports: [ "127.0.0.1:4438:4438/udp", "127.0.0.1:4438:4438/tcp" ]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./lab.crt:/certs/lab.crt:ro
+      - ./lab.key:/certs/lab.key:ro
+    networks: { n3: { ipv4_address: 172.43.0.12 } }
+networks:
+  n3: { ipam: { config: [ { subnet: 172.43.0.0/24 } ] } }

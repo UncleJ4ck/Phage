@@ -7,7 +7,7 @@ AdaptiveMutator (same mutate/reward surface). Evaporation plus a floor stops any
 trail from starving the rest. See docs/EVO.md."""
 
 import random
-from typing import List
+from typing import List, Optional, Sequence
 
 from .genome import Genome, apply_operator, pick_operator
 
@@ -15,7 +15,11 @@ from .genome import Genome, apply_operator, pick_operator
 class StigmergyMutator:
     """Operator selection biased by pheromone on prev-op -> next-op transitions.
     pher[0] is the start trail; pher[i+1] leaves operator i. reward() evaporates
-    all trails then deposits along the path just walked."""
+    all trails then deposits along the path just walked.
+
+    `prior` seeds every row with a per-operator bias (e.g. patch-diff-guided
+    weights): the touched malformation family starts favoured but adaptation and
+    the floor still let the rest compete. None -> uniform start (unchanged)."""
 
     def __init__(
         self,
@@ -23,9 +27,13 @@ class StigmergyMutator:
         deposit: float = 1.0,
         evaporation: float = 0.1,
         floor: float = 0.05,
+        prior: Optional[Sequence[float]] = None,
     ) -> None:
         self.n = n_ops
-        self.pher = [[1.0] * n_ops for _ in range(n_ops + 1)]
+        start = list(prior) if prior is not None else [1.0] * n_ops
+        if len(start) != n_ops:
+            raise ValueError(f"prior length {len(start)} != n_ops {n_ops}")
+        self.pher = [list(start) for _ in range(n_ops + 1)]
         self._deposit = deposit
         self._evaporation = evaporation
         self._floor = floor

@@ -1,0 +1,27 @@
+services:
+  origin:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes: [ "../:/app:ro", "./logs:/logs" ]
+    environment: { CONN_LOG: /logs/conn_bk.log }
+    command: python /app/lab_envoy_h3/conn_bk.py
+    networks: { e3: { ipv4_address: 172.44.0.10 } }
+  tap_ev:
+    image: python:3.12-slim
+    command: python /app/tap.py
+    environment: { TAP_LISTEN: "9099", TAP_UP: "172.44.0.10:8080", TAP_LOG: "/logs/tap_ev.jsonl" }
+    volumes: [ "./tap.py:/app/tap.py:ro", "./logs:/logs" ]
+    depends_on: [origin]
+    networks: { e3: { ipv4_address: 172.44.0.11 } }
+  envoy:
+    image: envoyproxy/envoy:v1.31-latest
+    command: ["-c","/etc/envoy/envoy.yaml","-l","warning"]
+    depends_on: [tap_ev]
+    ports: [ "127.0.0.1:4439:4439/udp", "127.0.0.1:4439:4439/tcp" ]
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./lab.crt:/certs/lab.crt:ro
+      - ./lab.key:/certs/lab.key:ro
+    networks: { e3: { ipv4_address: 172.44.0.12 } }
+networks:
+  e3: { ipam: { config: [ { subnet: 172.44.0.0/24 } ] } }
