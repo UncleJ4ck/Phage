@@ -4,7 +4,7 @@ the body bytes actually delivered (CVE-2026-33555 class). SENTINEL FIRST: on the
 build the hunt MUST rediscover the standalone-FIN desync, else its zeros are noise.
 Usage: python h3_hunt.py <port> [gens] [seeds]  (4434=vuln, 4433=patched)"""
 import random, sys
-sys.path.insert(0, "/home/j4kuuu/Desktop/tools/QuicDrawH3/src")
+sys.path.insert(0, "/home/j4kuuu/Desktop/tools/Phage/src")
 from phage.evo import genome as G
 from phage.evo.oracle import Observation
 from phage.evo.gates import stabilized

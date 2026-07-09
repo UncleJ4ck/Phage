@@ -4,7 +4,7 @@ than sozu acknowledged (tail > head, tail >= 2). Both are real deployed parsers,
 hit is a genuine (kawa, backend) desync. SENTINEL FIRST: benign -> (1,1); a pipelined
 pair -> (2,2); else the oracle is blind. stabilize n=3, ddmin each hit."""
 import os, random, socket, sys, time
-sys.path.insert(0, "/home/j4kuuu/Desktop/tools/QuicDrawH3/src")
+sys.path.insert(0, "/home/j4kuuu/Desktop/tools/Phage/src")
 from phage.evo import genome as G
 from phage.evo.oracle import Observation
 from phage.evo.gates import stabilized
