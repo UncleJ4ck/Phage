@@ -338,6 +338,21 @@ the backend.
   content and CL/body before the H1 downgrade. The least-audited major QUIC stack is
   defended too.
 
+## Apache httpd 2.4.68 (8th stack, mod_http2 + mod_proxy_http) - clean negative
+A differently-implemented (C, widely deployed) H2->H1 downgrader. Buffers a no-CL body and
+emits Content-Length (no chunked path), drops H2 trailers cleanly (unlike ATS, no folding),
+and rejects every synthesis primitive (standalone-END_STREAM, CRLF-in-value, :path
+request-line injection, dup :path, H2.TE, dup content-length) plus CL<data and CL:0+body.
+0 forwarded to the backend in every malformed case. Clean negative.
+
+## Whitebox audits (source-level, ultimate-vuln-research)
+- ATS 10.1.x trailer path: proven benign (num_header_bytes aliases the actual print count; no
+  length-vs-print divergence). Correctness bug, not a desync.
+- sozu 2.0 mux H2 DATA handling (h2.rs): meticulous and well-reviewed. `content_length_exempt`
+  is correctly limited to HEAD/1xx/204/304 responses; CL-mismatch (received > declared) RSTs
+  per frame with RFC 9113 8.1.1 / flow-control citations; CVE-2019-9518 empty-DATA flood
+  tracked. No desync gap found. The team already ships h2_security_* fuzz tests.
+
 ## Round verdict (2026-07-09)
 Tested H3->H1 and/or H2->H1 across HAProxy, nginx, Caddy, Envoy, ATS, sozu, OpenLiteSpeed
 for synthesis (QPACK/HPACK field injection), CL-lies (standalone-FIN, body-length-lie),

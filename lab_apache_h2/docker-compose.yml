@@ -1,0 +1,28 @@
+# Apache httpd 2.4 (mod_http2 + mod_proxy_http) H2 edge -> tap -> Node/llhttp backend.
+# An 8th, differently-implemented H2->H1 downgrader (C, widely deployed).
+services:
+  origin:
+    image: node:22-alpine
+    working_dir: /app
+    volumes: [ "./chunk_bk.js:/app/chunk_bk.js:ro", "./logs:/logs" ]
+    environment: { CHUNK_LOG: /logs/chunk_bk.log }
+    command: node /app/chunk_bk.js
+    networks: { ap: { ipv4_address: 172.50.0.10 } }
+  tap_ap:
+    image: python:3.12-slim
+    command: python /app/tap.py
+    environment: { TAP_LISTEN: "9094", TAP_UP: "172.50.0.10:8080", TAP_LOG: "/logs/tap_ap.jsonl" }
+    volumes: [ "./tap.py:/app/tap.py:ro", "./logs:/logs" ]
+    depends_on: [origin]
+    networks: { ap: { ipv4_address: 172.50.0.11 } }
+  apache:
+    image: httpd:2.4
+    depends_on: [tap_ap]
+    ports: [ "127.0.0.1:4441:4441/tcp" ]
+    volumes:
+      - ./httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
+      - ./lab.crt:/certs/lab.crt:ro
+      - ./lab.key:/certs/lab.key:ro
+    networks: { ap: { ipv4_address: 172.50.0.12 } }
+networks:
+  ap: { ipam: { config: [ { subnet: 172.50.0.0/24 } ] } }
