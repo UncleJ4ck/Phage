@@ -303,9 +303,9 @@ def _mut_case_variant_cl(g: Genome, rng: random.Random) -> Genome:
 
 def _mut_te_obfuscate(g: Genome, rng: random.Random) -> Genome:
     """TE.TE: an obfuscated Transfer-Encoding some parsers honor and others drop.
-    The trailing-LWS and transfer-parameter forms defeat a naive suffix/exact
-    chunked check on the front while a backend that trims LWS still de-chunks
-    (sozu 2.x kawa vs Go net/http, issue sozu-proxy/sozu#726)."""
+    The trailing-LWS, list-form, and transfer-parameter variants defeat a naive
+    suffix or exact-match chunked check on one hop while a hop that trims linear
+    whitespace still de-chunks, which is the CL.TE / TE.CL disagreement."""
     variant = rng.choice(
         [
             (b" transfer-encoding", b"chunked"),

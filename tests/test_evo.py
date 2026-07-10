@@ -879,8 +879,8 @@ class TestCveClassGenes(unittest.TestCase):
         )
 
     def test_te_obfuscate_has_trailing_lws_variant(self):
-        # A trailing-LWS / parameter TE defeats a suffix-only chunked check on the front
-        # while a backend that trims LWS still de-chunks (sozu#726 regression class). At
+        # A trailing-LWS / parameter TE defeats a suffix-only chunked check on one hop
+        # while a hop that trims LWS still de-chunks (the CL.TE disagreement class). At
         # least one such variant must be reachable across draws.
         seen = set()
         for s in range(60):
