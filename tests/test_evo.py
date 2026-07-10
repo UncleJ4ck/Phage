@@ -878,6 +878,40 @@ class TestCveClassGenes(unittest.TestCase):
             )
         )
 
+    def test_te_obfuscate_has_trailing_lws_variant(self):
+        # A trailing-LWS / parameter TE defeats a suffix-only chunked check on the front
+        # while a backend that trims LWS still de-chunks (sozu#726 regression class). At
+        # least one such variant must be reachable across draws.
+        seen = set()
+        for s in range(60):
+            g = G._mut_te_obfuscate(G.seed_post(), random.Random(s))
+            for o in g:
+                if isinstance(o, G.Headers):
+                    for k, v in o.fields:
+                        if k.lower() == b"transfer-encoding":
+                            seen.add(v)
+        self.assertTrue(
+            any(v.rstrip() == b"chunked" and v != b"chunked" for v in seen),
+            f"no trailing-LWS chunked variant produced: {seen}",
+        )
+
+    def test_clte_null_chunk_gene(self):
+        from phage.evo.reference import render_h1
+        g = G._mut_clte_null_chunk(
+            [G.Headers((((b":method", b"GET"), (b":path", b"/a"),
+                         (b"transfer-encoding", b"chunked\t")))),
+             G.Data(b"orig", end_stream=True)],
+            random.Random(0),
+        )
+        # the body must be an empty terminating chunk followed by the smuggled request
+        data = [o for o in g if isinstance(o, G.Data)]
+        self.assertTrue(data and data[0].payload == b"0\r\n\r\n" + G.SMUGGLE_PAYLOAD)
+        # render_h1 auto-inserts a Content-Length equal to that full body length, so a
+        # CL-framing hop swallows the smuggled request as body while a TE hop splits it.
+        raw = render_h1(g)
+        self.assertIn(b"content-length: %d" % len(b"0\r\n\r\n" + G.SMUGGLE_PAYLOAD), raw)
+        self.assertIn(b"GET /smuggled HTTP/1.1", raw.split(b"\r\n\r\n", 1)[1])
+
     def test_crlf_injection_gene(self):
         g = G._mut_header_crlf_injection(G.seed_post(), random.Random(0))
         self.assertTrue(

