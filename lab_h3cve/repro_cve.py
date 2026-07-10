@@ -35,6 +35,11 @@ async def send(port, ops):
     cfg.verify_mode = ssl.CERT_NONE
     async with connect("127.0.0.1", port, configuration=cfg) as client:
         quic = client._quic
+        # wait for the QUIC handshake before sending, else the first request races it
+        try:
+            await asyncio.wait_for(client.wait_connected(), 5)
+        except Exception:
+            pass
         http = H3Connection(quic)
         sid = quic.get_next_available_stream_id()
         for op in ops:
@@ -46,7 +51,9 @@ async def send(port, ops):
                 http.send_data(stream_id=sid, data=op[1], end_stream=op[2])
             client.transmit()
             await asyncio.sleep(0.15)
-        await asyncio.sleep(0.3)
+        # HAProxy buffers the request body before forwarding; wait for the flush so the
+        # negative control shows its full body (else a short read looks like a desync).
+        await asyncio.sleep(1.5)
 
 
 def H(path, cl=None, method=b"POST"):
