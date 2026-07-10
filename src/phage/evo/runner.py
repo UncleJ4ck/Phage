@@ -202,11 +202,24 @@ def _live_run_case(
     import time
 
     from aioquic.asyncio.client import connect
+    from aioquic.asyncio.protocol import QuicConnectionProtocol
     from aioquic.h3.connection import H3_ALPN, H3Connection
     from aioquic.quic.configuration import QuicConfiguration
 
     from .driver import drive, drive_multi
     from .safety import assert_local
+
+    class _NoStreamAdapter(QuicConnectionProtocol):
+        """Phage reads backend behavior from the tap/echo log, never the client's
+        received-stream API. The base quic_event_received adapts each incoming
+        StreamDataReceived into an asyncio StreamReader/Writer and drops the writer;
+        on py3.14 the orphaned writer's __del__ fires write_eof -> a FIN on the request
+        stream, which corrupts any genome that awaits mid-stream (the Migrate/KeyUpdate
+        CID-pool / handshake pump). Suppress it; handshake and NEW_CONNECTION_ID handling
+        live in _process_events and are unaffected."""
+
+        def quic_event_received(self, event):
+            pass
 
     assert_local(f"https://{host}:{port}/")
     _, start = read_new_records(echo_log, 0)
@@ -218,7 +231,9 @@ def _live_run_case(
         cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
         cfg.verify_mode = ssl.CERT_NONE
         try:
-            async with connect(host, port, configuration=cfg) as client:
+            async with connect(
+                host, port, configuration=cfg, create_protocol=_NoStreamAdapter
+            ) as client:
                 http = H3Connection(client._quic)
                 if streams > 1:
                     sids = [

@@ -71,13 +71,14 @@ class KeyUpdate:
 
 @dataclass(frozen=True)
 class Migrate:
-    """Connection migration mid-request: rotate the connection ID (maps to
-    QuicConnection.change_connection_id), the client-side component of a path migration.
-    Probes whether the downgrader keeps request state bound to the connection ID across a
-    migration event. No HTTP/2 analogue. EFFECTIVE ONLY when the peer has advertised a spare
-    connection ID (active_connection_id_limit > 0 with NEW_CONNECTION_ID frames delivered);
-    if the peer CID pool is empty the call is a clean no-op and no migration occurs. Verified
-    against HAProxy 3.0.10 the pool was empty, so this gene is server-gated, not universal."""
+    """Rotate the connection ID mid-request (maps to QuicConnection.change_connection_id):
+    retire the current DCID and switch to a spare, the client side of a connection-ID change.
+    Probes whether an H3->H1 downgrader keeps request state bound across the rotation. No
+    HTTP/2 analogue. change_connection_id() is a silent no-op until the peer has advertised a
+    spare CID via NEW_CONNECTION_ID, which arrives ~1 RTT AFTER the handshake (HAProxy 3.0.10
+    advertises 3 spare CIDs, just not instantly). The driver pumps the loop until the CID pool
+    is non-empty so the rotation reaches the wire: timing-gated, not server-gated. Firing the
+    rotation is the primitive; it does not by itself demonstrate a desync."""
 
 
 Op = Union[Headers, Data, Delay, Reset, Fin, StopSending, KeyUpdate, Migrate]
@@ -696,9 +697,10 @@ def _mut_key_update(g: Genome, rng: random.Random) -> Genome:
 
 
 def _mut_migrate(g: Genome, rng: random.Random) -> Genome:
-    """Connection migration mid-request: declare CL:N, send M<N bytes, rotate the
-    connection ID, then send the rest and FIN. Probes whether the downgrade keeps request
-    state bound across a migration. No HTTP/2 analogue; a QUIC-transport primitive."""
+    """Connection-ID rotation mid-request: declare CL:N, send M<N bytes, rotate the DCID
+    (the driver waits for the peer's spare-CID pool so the rotation fires), then send the
+    rest and FIN. Probes whether the downgrade keeps request state bound across the rotation.
+    No HTTP/2 analogue; a QUIC-transport primitive."""
     n = rng.choice((10, 48, 100))
     out = _h3_set_cl(g, n)
     out.append(Data(b"A" * rng.choice((1, 3, 5)), end_stream=False))

@@ -448,6 +448,69 @@ class TestDriver(unittest.TestCase):
         self.assertEqual(errs[0][0], 1)  # the Reset op index
         self.assertEqual([c[0] for c in rec.calls], ["data", "data"])  # both Data sent
 
+    def _run_gated(self, kind, op, flip_after):
+        # Fake quic whose transport precondition (spare CID pool / handshake-complete)
+        # is unmet until `flip_after` sleeps, modeling the ~1 RTT frame delivery. Records
+        # the sleep count when the gated op finally fired.
+        class _Gated:
+            def __init__(self):
+                self.sleeps = 0
+                self.called_at = None
+                self.pool_ok_at_call = None
+                self._peer_cid_available = []
+                self._handshake_complete = False
+
+            def request_key_update(self):
+                self.called_at = self.sleeps
+                self.pool_ok_at_call = self._handshake_complete
+
+            def change_connection_id(self):
+                self.called_at = self.sleeps
+                self.pool_ok_at_call = bool(self._peer_cid_available)
+
+        q = _Gated()
+
+        async def fake_sleep(_s):
+            q.sleeps += 1
+            if q.sleeps >= flip_after:
+                if kind == "cid":
+                    q._peer_cid_available = [object()]
+                else:
+                    q._handshake_complete = True
+
+        errs = asyncio.run(
+            drive(q, q, 0, [op], transmit=lambda: None, sleep=fake_sleep)
+        )
+        return q, errs
+
+    def test_migrate_waits_for_cid_pool(self):
+        # change_connection_id() must fire only after the peer advertises a spare CID.
+        q, errs = self._run_gated("cid", G.Migrate(), flip_after=3)
+        self.assertEqual(errs, [], "gated op must not raise")
+        self.assertEqual(
+            q.called_at, 3, "rotation must wait for the pool, not fire early"
+        )
+        self.assertTrue(q.pool_ok_at_call, "pool must be non-empty when rotation fires")
+
+    def test_key_update_waits_for_handshake(self):
+        # request_key_update() asserts handshake-complete; the pump must wait for it.
+        q, errs = self._run_gated("handshake", G.KeyUpdate(), flip_after=2)
+        self.assertEqual(errs, [])
+        self.assertEqual(q.called_at, 2)
+        self.assertTrue(
+            q.pool_ok_at_call, "handshake must be complete when key update fires"
+        )
+
+    def test_migrate_bounded_when_pool_never_fills(self):
+        # If the precondition never holds, the pump is bounded (20 tries) and the op
+        # still fires (degrades to a no-op on the wire) rather than looping forever.
+        q, errs = self._run_gated("cid", G.Migrate(), flip_after=999)
+        self.assertEqual(errs, [])
+        self.assertEqual(q.sleeps, 20, "pump must stop at the bound")
+        self.assertFalse(
+            q.pool_ok_at_call, "fired anyway; wire no-op is the clean fallback"
+        )
+
 
 class TestPocRoundTrip(unittest.TestCase):
     def test_genome_survives_serialize(self):

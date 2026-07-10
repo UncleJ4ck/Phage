@@ -71,6 +71,26 @@ def h3_headers_frame(fields) -> bytes:
     return _uvarint(0x01) + _uvarint(len(section)) + section
 
 
+async def _pump_until(
+    pred: Callable[[], object],
+    transmit: Callable[[], None],
+    sleep: Callable[[float], Awaitable[None]],
+    tries: int = 20,
+    step: float = 0.02,
+) -> None:
+    """Flush and yield to the loop until pred() is truthy or the bound elapses. QUIC
+    transport-state ops depend on frames delivered ~1 RTT post-handshake: the
+    handshake-complete signal (KeyUpdate) and NEW_CONNECTION_ID spare CIDs (Migrate).
+    Firing those ops the instant the stream opens races that delivery, so the op would
+    assert or no-op. This waits for the precondition, bounded, then returns; if it never
+    holds the caller still runs the op and it degrades cleanly."""
+    for _ in range(tries):
+        if pred():
+            return
+        transmit()
+        await sleep(step)
+
+
 async def _drive_ops(
     http,
     quic,
@@ -120,10 +140,17 @@ async def _drive_ops(
             elif isinstance(op, StopSending):
                 quic.stop_stream(stream_id, op.error_code)
             elif isinstance(op, KeyUpdate):
-                # TLS 1.3 key rotation mid-stream (QuicConnection.request_key_update).
+                # request_key_update() asserts the handshake is complete. Reorder/crossover
+                # can place a KeyUpdate before any awaiting op, so pump the loop until the
+                # handshake finishes instead of letting the assert fire and skip the op.
+                await _pump_until(lambda: quic._handshake_complete, transmit, sleep)
                 quic.request_key_update()
             elif isinstance(op, Migrate):
-                # connection-ID rotation, the client side of a path migration.
+                # change_connection_id() silently no-ops until the peer advertises a spare
+                # CID via NEW_CONNECTION_ID (~1 RTT post-handshake). Pump until the pool is
+                # non-empty so the DCID rotation reaches the wire. A stacked Migrate that
+                # drains the pool re-hits empty and degrades cleanly to a no-op.
+                await _pump_until(lambda: quic._peer_cid_available, transmit, sleep)
                 quic.change_connection_id()
             elif isinstance(op, Delay):
                 transmit()
