@@ -897,10 +897,20 @@ class TestCveClassGenes(unittest.TestCase):
 
     def test_clte_null_chunk_gene(self):
         from phage.evo.reference import render_h1
+
         g = G._mut_clte_null_chunk(
-            [G.Headers((((b":method", b"GET"), (b":path", b"/a"),
-                         (b"transfer-encoding", b"chunked\t")))),
-             G.Data(b"orig", end_stream=True)],
+            [
+                G.Headers(
+                    (
+                        (
+                            (b":method", b"GET"),
+                            (b":path", b"/a"),
+                            (b"transfer-encoding", b"chunked\t"),
+                        )
+                    )
+                ),
+                G.Data(b"orig", end_stream=True),
+            ],
             random.Random(0),
         )
         # the body must be an empty terminating chunk followed by the smuggled request
@@ -909,7 +919,9 @@ class TestCveClassGenes(unittest.TestCase):
         # render_h1 auto-inserts a Content-Length equal to that full body length, so a
         # CL-framing hop swallows the smuggled request as body while a TE hop splits it.
         raw = render_h1(g)
-        self.assertIn(b"content-length: %d" % len(b"0\r\n\r\n" + G.SMUGGLE_PAYLOAD), raw)
+        self.assertIn(
+            b"content-length: %d" % len(b"0\r\n\r\n" + G.SMUGGLE_PAYLOAD), raw
+        )
         self.assertIn(b"GET /smuggled HTTP/1.1", raw.split(b"\r\n\r\n", 1)[1])
 
     def test_crlf_injection_gene(self):
