@@ -74,7 +74,10 @@ class Migrate:
     """Connection migration mid-request: rotate the connection ID (maps to
     QuicConnection.change_connection_id), the client-side component of a path migration.
     Probes whether the downgrader keeps request state bound to the connection ID across a
-    migration event. No HTTP/2 analogue. Wire behavior is gated on the QUIC transport."""
+    migration event. No HTTP/2 analogue. EFFECTIVE ONLY when the peer has advertised a spare
+    connection ID (active_connection_id_limit > 0 with NEW_CONNECTION_ID frames delivered);
+    if the peer CID pool is empty the call is a clean no-op and no migration occurs. Verified
+    against HAProxy 3.0.10 the pool was empty, so this gene is server-gated, not universal."""
 
 
 Op = Union[Headers, Data, Delay, Reset, Fin, StopSending, KeyUpdate, Migrate]
