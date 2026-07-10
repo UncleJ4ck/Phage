@@ -895,6 +895,26 @@ class TestCveClassGenes(unittest.TestCase):
             f"no trailing-LWS chunked variant produced: {seen}",
         )
 
+    def test_key_update_gene(self):
+        # QUIC transport-state gene: a key update between DATA frames, inside a body
+        # shorter than the declared Content-Length.
+        g = G._mut_key_update(G.seed_post(body=b"AAAA"), random.Random(0))
+        self.assertTrue(any(isinstance(o, G.KeyUpdate) for o in g))
+        # the key update sits between two Data ops (body spans the key epoch)
+        idx = next(i for i, o in enumerate(g) if isinstance(o, G.KeyUpdate))
+        self.assertTrue(any(isinstance(o, G.Data) for o in g[:idx]))
+        self.assertTrue(any(isinstance(o, G.Data) for o in g[idx + 1 :]))
+        # a content-length is declared (the CL-vs-delivered oracle needs it)
+        self.assertTrue(G.declared_content_length(g) is not None)
+
+    def test_migrate_gene(self):
+        # QUIC transport-state gene: a connection-ID rotation mid-request.
+        g = G._mut_migrate(G.seed_post(body=b"AAAA"), random.Random(0))
+        self.assertTrue(any(isinstance(o, G.Migrate) for o in g))
+        idx = next(i for i, o in enumerate(g) if isinstance(o, G.Migrate))
+        self.assertTrue(any(isinstance(o, G.Data) for o in g[:idx]))
+        self.assertTrue(G.declared_content_length(g) is not None)
+
     def test_clte_null_chunk_gene(self):
         from phage.evo.reference import render_h1
 

@@ -61,7 +61,23 @@ class StopSending:
     error_code: int = 0
 
 
-Op = Union[Headers, Data, Delay, Reset, Fin, StopSending]
+@dataclass(frozen=True)
+class KeyUpdate:
+    """Request a TLS 1.3 key update mid-stream (maps to QuicConnection.request_key_update).
+    A connection-level transport event with no HTTP/2 analogue: it rotates the traffic
+    keys between DATA frames. Probes whether a downgrader mis-handles a request whose body
+    spans a key epoch boundary. Wire behavior is gated on the QUIC transport runtime."""
+
+
+@dataclass(frozen=True)
+class Migrate:
+    """Connection migration mid-request: rotate the connection ID (maps to
+    QuicConnection.change_connection_id), the client-side component of a path migration.
+    Probes whether the downgrader keeps request state bound to the connection ID across a
+    migration event. No HTTP/2 analogue. Wire behavior is gated on the QUIC transport."""
+
+
+Op = Union[Headers, Data, Delay, Reset, Fin, StopSending, KeyUpdate, Migrate]
 Genome = List[Op]
 
 # H3 error codes worth resetting with.
@@ -663,6 +679,32 @@ def _mut_reset_mid_body(g: Genome, rng: random.Random) -> Genome:
     return out
 
 
+def _mut_key_update(g: Genome, rng: random.Random) -> Genome:
+    """TLS key update mid-body: declare CL:N, send M<N bytes, rotate the traffic keys,
+    then send the rest and FIN. Probes whether an H3->H1 downgrade mis-frames a request
+    body that spans a key epoch boundary. No HTTP/2 analogue; a QUIC-transport primitive."""
+    n = rng.choice((10, 48, 100))
+    out = _h3_set_cl(g, n)
+    out.append(Data(b"A" * rng.choice((1, 3, 5)), end_stream=False))
+    out.append(KeyUpdate())
+    out.append(Data(b"B" * rng.choice((1, 3)), end_stream=False))
+    out.append(Fin())
+    return out
+
+
+def _mut_migrate(g: Genome, rng: random.Random) -> Genome:
+    """Connection migration mid-request: declare CL:N, send M<N bytes, rotate the
+    connection ID, then send the rest and FIN. Probes whether the downgrade keeps request
+    state bound across a migration. No HTTP/2 analogue; a QUIC-transport primitive."""
+    n = rng.choice((10, 48, 100))
+    out = _h3_set_cl(g, n)
+    out.append(Data(b"A" * rng.choice((1, 3, 5)), end_stream=False))
+    out.append(Migrate())
+    out.append(Data(b"B" * rng.choice((1, 3)), end_stream=False))
+    out.append(Fin())
+    return out
+
+
 def _mut_authority_host_conflict(g: Genome, rng: random.Random) -> Genome:
     """:authority plus an explicit Host header with a different value. The downgrade
     synthesizes Host from :authority; a surviving conflicting Host reaches the backend
@@ -744,6 +786,8 @@ H3_OPERATOR_NAMES = (
     "_mut_standalone_fin",
     "_mut_body_length_lie",
     "_mut_reset_mid_body",
+    "_mut_key_update",
+    "_mut_migrate",
     "_mut_authority_host_conflict",
     "_mut_pseudo_path_space",
     "_mut_h3_reqline_inject",
@@ -781,6 +825,8 @@ OPERATORS: Tuple[Callable[[Genome, random.Random], Genome], ...] = (
     _mut_standalone_fin,
     _mut_body_length_lie,
     _mut_reset_mid_body,
+    _mut_key_update,
+    _mut_migrate,
     _mut_authority_host_conflict,
     _mut_pseudo_path_space,
     _mut_h3_reqline_inject,

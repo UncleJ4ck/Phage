@@ -7,7 +7,17 @@ Imports no QUIC code, so the op->call mapping is unit-testable."""
 import asyncio
 from typing import Awaitable, Callable, List, Tuple
 
-from .genome import Data, Delay, Fin, Genome, Headers, Reset, StopSending
+from .genome import (
+    Data,
+    Delay,
+    Fin,
+    Genome,
+    Headers,
+    KeyUpdate,
+    Migrate,
+    Reset,
+    StopSending,
+)
 
 
 def _uvarint(n: int) -> bytes:
@@ -109,6 +119,12 @@ async def _drive_ops(
                 quic.reset_stream(stream_id, op.error_code)
             elif isinstance(op, StopSending):
                 quic.stop_stream(stream_id, op.error_code)
+            elif isinstance(op, KeyUpdate):
+                # TLS 1.3 key rotation mid-stream (QuicConnection.request_key_update).
+                quic.request_key_update()
+            elif isinstance(op, Migrate):
+                # connection-ID rotation, the client side of a path migration.
+                quic.change_connection_id()
             elif isinstance(op, Delay):
                 transmit()
                 if op.seconds > 0:
