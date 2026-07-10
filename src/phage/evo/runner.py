@@ -279,6 +279,104 @@ def _live_run_case(
     return run_case
 
 
+def capture_session_ticket(host: str, port: int, timeout: float = 5.0):
+    """Prime a connection and return the QUIC session ticket the server issues, for 0-RTT
+    resumption. None when the server issues no early-data ticket (e.g. HAProxy built with
+    limited-quic / OpenSSL QUIC-compat does not advertise early data, so 0-RTT is unavailable
+    and any resumed send degrades to 1-RTT)."""
+    import asyncio
+    import ssl
+
+    from aioquic.asyncio.client import connect
+    from aioquic.asyncio.protocol import QuicConnectionProtocol
+    from aioquic.h3.connection import H3_ALPN
+    from aioquic.quic.configuration import QuicConfiguration
+
+    from .safety import assert_local
+
+    assert_local(f"https://{host}:{port}/")
+
+    class _NoStreamAdapter(QuicConnectionProtocol):
+        def quic_event_received(self, event):
+            pass
+
+    box = {}
+    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+    cfg.verify_mode = ssl.CERT_NONE
+
+    async def _prime():
+        async with connect(
+            host,
+            port,
+            configuration=cfg,
+            create_protocol=_NoStreamAdapter,
+            session_ticket_handler=lambda t: box.setdefault("t", t),
+        ) as client:
+            await asyncio.wait_for(client.wait_connected(), timeout)
+            for _ in range(40):  # NewSessionTicket lands shortly after the handshake
+                if "t" in box:
+                    break
+                await asyncio.sleep(0.05)
+
+    asyncio.new_event_loop().run_until_complete(_prime())
+    return box.get("t")
+
+
+def drive_early_data(host, port, genome, session_ticket, raw=False, settle=1.0):
+    """Resume a session and drive `genome` as 0-RTT EARLY DATA: emit the ops before the
+    handshake completes (wait_connected=False). Returns (had_0rtt_keys, errors). had_0rtt_keys
+    is True only when resumption produced valid ZERO_RTT send keys, i.e. the ops actually
+    went out as early data rather than being buffered to 1-RTT. Re-firing with the same
+    ticket replays the early data (the 0-RTT replay property). Pair with
+    capture_session_ticket for the two-connection flow."""
+    import asyncio
+    import ssl
+
+    from aioquic.asyncio.client import connect
+    from aioquic.asyncio.protocol import QuicConnectionProtocol
+    from aioquic.h3.connection import H3_ALPN, H3Connection
+    from aioquic.quic.configuration import QuicConfiguration
+    from aioquic.tls import Epoch
+
+    from .driver import drive
+    from .safety import assert_local
+
+    assert_local(f"https://{host}:{port}/")
+
+    class _NoStreamAdapter(QuicConnectionProtocol):
+        def quic_event_received(self, event):
+            pass
+
+    cfg = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+    cfg.verify_mode = ssl.CERT_NONE
+    cfg.session_ticket = session_ticket
+    out = {"had_0rtt": False, "errors": []}
+
+    async def _fire():
+        async with connect(
+            host,
+            port,
+            configuration=cfg,
+            create_protocol=_NoStreamAdapter,
+            wait_connected=False,
+        ) as client:
+            q = client._quic
+            http = H3Connection(q)
+            sid = q.get_next_available_stream_id()
+            z = q._cryptos.get(Epoch.ZERO_RTT)
+            out["had_0rtt"] = bool(z and z.send.is_valid())
+            out["errors"] = await drive(
+                http, q, sid, genome, transmit=client.transmit, raw=raw
+            )
+            await asyncio.sleep(settle)
+
+    try:
+        asyncio.new_event_loop().run_until_complete(_fire())
+    except ValueError:
+        pass
+    return out["had_0rtt"], out["errors"]
+
+
 def main() -> int:
     import argparse
 
