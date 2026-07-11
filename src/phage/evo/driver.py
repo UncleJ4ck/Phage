@@ -16,6 +16,7 @@ from .genome import (
     KeyUpdate,
     Migrate,
     Reset,
+    ResetStreamAt,
     StopSending,
 )
 
@@ -152,6 +153,13 @@ async def _drive_ops(
                 # drains the pool re-hits empty and degrades cleanly to a no-op.
                 await _pump_until(lambda: quic._peer_cid_available, transmit, sleep)
                 quic.change_connection_id()
+            elif isinstance(op, ResetStreamAt):
+                # RESET_STREAM_AT (reliable stream reset, frame 0x24). aioquic has no native
+                # support; quic_ext.enable_reliable_reset installs send_reset_stream_at, which
+                # the runner/oracle calls after connect. Emits the raw frame on the next flush.
+                quic.send_reset_stream_at(
+                    stream_id, op.error_code, op.final_size, op.reliable_size
+                )
             elif isinstance(op, Delay):
                 transmit()
                 if op.seconds > 0:

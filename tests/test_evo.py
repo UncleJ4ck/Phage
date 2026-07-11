@@ -978,6 +978,44 @@ class TestCveClassGenes(unittest.TestCase):
         self.assertTrue(any(isinstance(o, G.Data) for o in g[:idx]))
         self.assertTrue(G.declared_content_length(g) is not None)
 
+    def test_reliable_reset_gene(self):
+        # RESET_STREAM_AT gene: body bytes, then a reliable size BELOW what was sent
+        # (retroactive truncation), placed after a Data op.
+        g = G._mut_reliable_reset(G.seed_post(body=b"AAAA"), random.Random(1))
+        rats = [o for o in g if isinstance(o, G.ResetStreamAt)]
+        self.assertTrue(rats)
+        idx = next(i for i, o in enumerate(g) if isinstance(o, G.ResetStreamAt))
+        sent = sum(len(o.payload) for o in g[:idx] if isinstance(o, G.Data))
+        self.assertLess(
+            rats[0].reliable_size, sent, "reliable size must be below bytes sent"
+        )
+
+    def test_encode_reset_stream_at_bytes(self):
+        # Exact on-wire varint encoding: type 0x24, then four varints.
+        from phage.evo.quic_ext import encode_reset_stream_at
+
+        self.assertEqual(
+            encode_reset_stream_at(0, 0x10C, 60, 5), bytes.fromhex("2400410c3c05")
+        )
+        # single-byte varints for small values
+        self.assertEqual(
+            encode_reset_stream_at(4, 1, 8, 0), bytes.fromhex("2404010800")
+        )
+
+    def test_enable_reliable_reset_queues(self):
+        # enable_reliable_reset gives a send_reset_stream_at that queues a frame; idempotent.
+        from phage.evo.quic_ext import enable_reliable_reset
+
+        class _FakeQuic:
+            def _write_application(self, *a):
+                pass
+
+        q = _FakeQuic()
+        enable_reliable_reset(q)
+        enable_reliable_reset(q)  # idempotent
+        q.send_reset_stream_at(0, 0x10C, 60, 5)
+        self.assertEqual(q._reset_at_pending, [(0, 0x10C, 60, 5)])
+
     def test_clte_null_chunk_gene(self):
         from phage.evo.reference import render_h1
 

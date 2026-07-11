@@ -35,6 +35,7 @@ OP_TYPES = (
     G.StopSending,
     G.KeyUpdate,
     G.Migrate,
+    G.ResetStreamAt,
 )
 
 
