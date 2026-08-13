@@ -1,0 +1,119 @@
+[
+  {
+    "name": "Go net/http",
+    "parser": "net/http",
+    "results": {
+      "chunked": "SMUGGLE",
+      "chunked<TAB>": "SMUGGLE",
+      "chunked<SP>": "SMUGGLE",
+      "chunked;a=b": "reject 501",
+      "chunked, identity": "reject 501"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "Node 22",
+    "parser": "llhttp",
+    "results": {
+      "chunked": "reject 400",
+      "chunked<TAB>": "reject 400",
+      "chunked<SP>": "reject 400",
+      "chunked;a=b": "reject 400",
+      "chunked, identity": "reject 400"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "uvicorn --http h11",
+    "parser": "h11",
+    "results": {
+      "chunked": "SMUGGLE",
+      "chunked<TAB>": "SMUGGLE",
+      "chunked<SP>": "SMUGGLE",
+      "chunked;a=b": "reject 400",
+      "chunked, identity": "reject 400"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "uvicorn --http httptools",
+    "parser": "httptools",
+    "results": {
+      "chunked": "reject 400",
+      "chunked<TAB>": "reject 400",
+      "chunked<SP>": "reject 400",
+      "chunked;a=b": "reject 400",
+      "chunked, identity": "reject 400"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "Hypercorn",
+    "parser": "h11",
+    "results": {
+      "chunked": "SMUGGLE",
+      "chunked<TAB>": "SMUGGLE",
+      "chunked<SP>": "SMUGGLE",
+      "chunked;a=b": "reject 501",
+      "chunked, identity": "reject 501"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "gunicorn (sync)",
+    "parser": "gunicorn http",
+    "results": {
+      "chunked": "reject 400",
+      "chunked<TAB>": "reject 400",
+      "chunked<SP>": "reject 400",
+      "chunked;a=b": "reject 501",
+      "chunked, identity": "reject 400"
+    },
+    "trusted": false,
+    "control_responses": 1
+  },
+  {
+    "name": "Werkzeug (dev)",
+    "parser": "werkzeug",
+    "results": {
+      "chunked": "CL-safe",
+      "chunked<TAB>": "CL-safe",
+      "chunked<SP>": "CL-safe",
+      "chunked;a=b": "no-response",
+      "chunked, identity": "CL-safe"
+    },
+    "trusted": false,
+    "control_responses": 0
+  },
+  {
+    "name": "Puma",
+    "parser": "puma (C)",
+    "results": {
+      "chunked": "SMUGGLE",
+      "chunked<TAB>": "SMUGGLE",
+      "chunked<SP>": "SMUGGLE",
+      "chunked;a=b": "reject 501",
+      "chunked, identity": "reject 400"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "WEBrick",
+    "parser": "webrick",
+    "results": {
+      "chunked": "CL-safe",
+      "chunked<TAB>": "CL-safe",
+      "chunked<SP>": "CL-safe",
+      "chunked;a=b": "CL-safe",
+      "chunked, identity": "CL-safe"
+    },
+    "trusted": true,
+    "control_responses": 2
+  }
+]
