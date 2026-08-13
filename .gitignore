@@ -48,3 +48,6 @@ lab_*/*.jsonl
 lab_*/logs/
 lab_*/**/__pycache__/
 lab_*/envoy.local.yaml
+
+# AI tooling artifacts, never commit
+.serena/

@@ -9,7 +9,7 @@ records:
   udp:
     threads: 1
   http:
-    server_ports: "8080 4436:quic:ssl"
+    server_ports: "8080 4436:quic"
     send_http11_requests: 1
     chunking_enabled: 1
     keep_alive_enabled_in: 1

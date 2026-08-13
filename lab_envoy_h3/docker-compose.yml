@@ -17,7 +17,7 @@ services:
     image: envoyproxy/envoy:v1.31-latest
     command: ["-c","/etc/envoy/envoy.yaml","-l","warning"]
     depends_on: [tap_ev]
-    ports: [ "127.0.0.1:4439:4439/udp", "127.0.0.1:4439:4439/tcp" ]
+    ports: [ "127.0.0.1:4439:4439/udp", "127.0.0.1:4439:4439/tcp", "127.0.0.1:9901:9901/tcp" ]
     volumes:
       - ./envoy.local.yaml:/etc/envoy/envoy.yaml:ro
       - ./lab.crt:/certs/lab.crt:ro
