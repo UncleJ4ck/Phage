@@ -20,7 +20,7 @@ jobs:
         run: pip install -e . ruff
       - name: Lint
         run: |
-          ruff check src/phage/evo tests
-          ruff format --check src/phage/evo tests
+          ruff check src/phage/evo tests matrix
+          ruff format --check src/phage/evo tests matrix
       - name: Unit + fuzz suite
         run: python -m unittest discover -s tests -v
