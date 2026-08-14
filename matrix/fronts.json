@@ -1,0 +1,57 @@
+[
+  {
+    "name": "HAProxy 3.0",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "rejected 400"
+    },
+    "reachable": true
+  },
+  {
+    "name": "nginx 1.27",
+    "results": {
+      "chunked": "rejected 400",
+      "chunked<TAB>": "rejected 501",
+      "chunked<SP>": "rejected 400",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Caddy 2",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Traefik 3",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "sozu 2.1.0 (control, known-vulnerable)",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "FORWARDS-BOTH",
+      "chunked<SP>": "FORWARDS-BOTH",
+      "chunked;a=b": "FORWARDS-BOTH",
+      "chunked, identity": "FORWARDS-BOTH"
+    },
+    "reachable": true
+  }
+]
