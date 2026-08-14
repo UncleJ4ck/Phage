@@ -9,9 +9,24 @@ Phage began as CyberArk Labs'
 [QuicDrawH3](https://github.com/cyberark/QuicDrawH3) (the `Quic-Fin-Sync` racing
 client by Maor Abutbul), originally published in "[Racing and Fuzzing
 HTTP/3](https://www.cyberark.com/resources/threat-research-blog/racing-and-fuzzing-http-3-open-sourcing-quicdraw)".
-This fork adds `phage.evo`: a coverage-guided, quality-diverse evolutionary
-engine that searches the H3 framing space for desyncs, with biology- and
-physics-inspired search mechanisms. See [docs/EVO.md](docs/EVO.md).
+This fork adds two things on top of that base:
+
+- **`phage.evo`**, a coverage-guided, quality-diverse evolutionary engine that
+  searches the H1/H2/H3 framing space for desyncs. A test case is a *genome* of
+  framing operations rather than a byte string, so every case is sendable by
+  construction and the same genome runs over all three protocol versions. See
+  [docs/EVO.md](docs/EVO.md).
+- **`matrix/`**, a framing honor matrix. A desync is a disagreement between two
+  parsers, so instead of testing proxy-backend pairs it measures each half
+  independently and joins them into predicted pairs. n fronts and m backends give
+  n*m predictions from n+m measurements. See [the matrix section](#framing-honor-matrix).
+
+Phage reaches one layer below where other HTTP/3 tooling stops: it can emit raw
+QUIC transport frames, including `RESET_STREAM_AT` from the reliable-stream-reset
+draft, which aioquic does not implement.
+
+Research written up in [Half a vulnerability
+each](https://cornfield.sh/half-a-vulnerability-each/).
 
 ## TOC
 
@@ -41,6 +56,11 @@ physics-inspired search mechanisms. See [docs/EVO.md](docs/EVO.md).
     Request](#example-1-simple-http3-request)
   - [Example 2: Fuzzing with a
     Wordlist](#example-2-fuzzing-with-a-wordlist)
+- [Framing honor matrix](#framing-honor-matrix)
+  - [Adding a target](#adding-a-target)
+  - [The control gate](#the-control-gate)
+- [Evolutionary desync search](#evolutionary-desync-search)
+- [Research](#research)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
 - [Known issues](#known-issues)
@@ -64,6 +84,25 @@ physics-inspired search mechanisms. See [docs/EVO.md](docs/EVO.md).
     the QUIC network protocol in Python.
   - It features a minimal TLS 1.3 implementation, a QUIC stack, and
     an HTTP/3 stack.
+
+Added by this fork:
+
+- **Evolutionary desync search** (`phage.evo`): MAP-Elites over a genome of
+  framing ops, 36 mutation operators, a differential oracle with a built-in
+  negative control, and auto-minimization of every hit.
+- **One genome, three protocols**: the same framing genome drives HTTP/1,
+  HTTP/2 (raw HPACK) and HTTP/3, so a primitive found at one layer is
+  immediately testable at the others.
+- **QUIC transport-state genes**: connection-ID rotation (`Migrate`), TLS key
+  update (`KeyUpdate`), and `RESET_STREAM_AT` (`ResetStreamAt`), the
+  reliable-stream-reset frame that lets a sender shrink the delivered body
+  length after the bytes are already on the wire. aioquic does not implement
+  that frame; `phage.evo.quic_ext` emits it raw.
+- **0-RTT early-data mode**: resume a session and drive a genome as early data,
+  reporting whether real 0-RTT keys were obtained rather than assuming it.
+- **Framing honor matrix** (`matrix/`): measures which servers honor and which
+  proxies forward each malformed framing header, then predicts the pairs that
+  desync.
 
 ## Quick Start
 
@@ -302,6 +341,101 @@ Note: "copy-as-curl compatible" meaning common curl arguments (-d,-H,-b)
 are supported by Phage-UI.
 
 ---
+
+---
+
+# Framing honor matrix
+
+A request smuggling bug is not a property of a proxy. It is a property of a pair:
+a front that draws the message boundary one way and a back that draws it another.
+Testing pairs costs one experiment per pair and tells you nothing about the pair
+you did not try, so `matrix/` measures the two halves separately.
+
+- **Back half**: which malformed framing values does a server *honor*? Signal is
+  the number of HTTP responses it emits for one carrier request that hides a
+  second request behind a zero-length chunk. Two responses means it de-chunked
+  and framed the hidden bytes as a request of their own.
+- **Front half**: which values does a proxy *forward* next to a `Content-Length`
+  instead of acting on them? Signal is the exact request head the proxy emits to
+  a byte-recording origin.
+- **Join**: a pair is predicted to desync when the front forwards a value the
+  back honors.
+
+```bash
+python matrix/run_matrix.py     # back half  -> matrix/MATRIX.md, matrix/results.json
+python matrix/run_fronts.py     # front half -> matrix/fronts.json
+python matrix/pairs.py          # join       -> matrix/PAIRS.md
+```
+
+The two measurement scripts take `--only <substring>` to run a subset;
+`pairs.py` just joins the JSON the other two wrote. Every backend and front runs
+as a container bound to loopback.
+
+## Adding a target
+
+One entry in `matrix/backends.py` (image, port, a trivial app) or
+`matrix/fronts.py` (image, port, a config template). One entry in `VARIANTS` adds
+a framing value and multiplies it across the whole population.
+
+## The control gate
+
+Counting responses can only see a second framed request on a connection the
+server keeps open, so a backend that closes after one response can never make the
+counter reach two. Every row is therefore gated on a pipelining control that must
+return two responses. A row that fails it is reported `UNTRUSTED`, never as safe:
+a negative from an instrument that has not been shown to produce a positive is not
+evidence of absence, it is an untested instrument.
+
+The front harness carries the same discipline as a permanent fixture: a
+known-vulnerable proxy sits in the population so that if the harness silently
+breaks, the calibration row goes quiet first.
+
+**Predictions are hypotheses.** `PAIRS.md` says so. A predicted pair still has to
+be fired end to end and confirmed against a negative control before it is a
+vulnerability.
+
+---
+
+# Evolutionary desync search
+
+```bash
+python -m phage.evo --host 127.0.0.1 --port 4433 \
+    --echo-log lab/logs/echo.jsonl --generations 200 --raw
+```
+
+`--raw` hand-builds the frames instead of going through a conformant client, so a
+`Content-Length` that contradicts the body, or a header a polite client would
+refuse to send, actually reaches the wire. A saved hit replays with
+`--replay poc.json`. Labs are under `lab_*/`; they are local-only and bind to
+loopback.
+
+---
+
+# Research
+
+- **CVE-2026-33555**, HAProxy HTTP/3 to HTTP/1 standalone-FIN desync. Fixed in
+  HAProxy 3.0.19. The `Fin` gene is that primitive, and the lab under
+  `lab_h3cve/` reproduces it with a negative control.
+- **sozu / kawa `Transfer-Encoding` smuggling**, a regression of
+  [sozu#726](https://github.com/sozu-proxy/sozu/issues/726). kawa 0.6.8 selected
+  chunked framing with a suffix-only compare and no OWS trim, so
+  `Transfer-Encoding: chunked\t` was forwarded alongside `Content-Length`.
+  Reported 2026-07-10, fixed in [kawa
+  PR #19](https://github.com/CleverCloud/kawa/pull/19), shipped in kawa 0.7.0 and
+  sozu 2.2.0. Advisory: [rustsec/advisory-db#3142](https://github.com/rustsec/advisory-db/pull/3142).
+- **Honest negatives.** QUIC transport-state events (connection-ID rotation, key
+  update) cause no desync on HAProxy, Caddy, nginx or Envoy: they sit below the
+  HTTP framing layer, so a proxy that binds request state to the stream is immune
+  by construction. QPACK blocked decoding buffers rather than partially
+  forwarding, so it is a memory/DoS primitive and not a smuggling one. Both were
+  killed with live tests rather than argued away.
+- **`RESET_STREAM_AT` retroactive truncation** is a primitive, not a finding.
+  Every shipping stack tested rejects the frame, and Google QUICHE implements it
+  but ships it disabled. The mechanism is demonstrated against a reference
+  downgrader in `lab_h3cve/reference_downgrader.py`, which is code in this repo,
+  not anything you run in production.
+
+Write-up: [Half a vulnerability each](https://cornfield.sh/half-a-vulnerability-each/).
 
 # Contributing
 
