@@ -6,8 +6,14 @@
       "chunked": "SMUGGLE",
       "chunked<TAB>": "SMUGGLE",
       "chunked<SP>": "SMUGGLE",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "SMUGGLE",
       "chunked;a=b": "reject 501",
-      "chunked, identity": "reject 501"
+      "chunked, identity": "reject 501",
+      "identity, chunked": "reject 501",
+      "dup TE": "reject 501",
+      "TE obs-fold": "reject 501",
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -19,8 +25,14 @@
       "chunked": "reject 400",
       "chunked<TAB>": "reject 400",
       "chunked<SP>": "reject 400",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "reject 400",
       "chunked;a=b": "reject 400",
-      "chunked, identity": "reject 400"
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 400",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -32,8 +44,14 @@
       "chunked": "SMUGGLE",
       "chunked<TAB>": "SMUGGLE",
       "chunked<SP>": "SMUGGLE",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "SMUGGLE",
       "chunked;a=b": "reject 400",
-      "chunked, identity": "reject 400"
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 400",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -45,8 +63,14 @@
       "chunked": "reject 400",
       "chunked<TAB>": "reject 400",
       "chunked<SP>": "reject 400",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "reject 400",
       "chunked;a=b": "reject 400",
-      "chunked, identity": "reject 400"
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 400",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -58,8 +82,14 @@
       "chunked": "SMUGGLE",
       "chunked<TAB>": "SMUGGLE",
       "chunked<SP>": "SMUGGLE",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "SMUGGLE",
       "chunked;a=b": "reject 501",
-      "chunked, identity": "reject 501"
+      "chunked, identity": "reject 501",
+      "identity, chunked": "reject 501",
+      "dup TE": "reject 501",
+      "TE obs-fold": "reject 501",
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -71,8 +101,14 @@
       "chunked": "reject 400",
       "chunked<TAB>": "reject 400",
       "chunked<SP>": "reject 400",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "reject 400",
       "chunked;a=b": "reject 501",
-      "chunked, identity": "reject 400"
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 400",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 501"
     },
     "trusted": false,
     "control_responses": 1
@@ -84,8 +120,14 @@
       "chunked": "CL-safe",
       "chunked<TAB>": "CL-safe",
       "chunked<SP>": "CL-safe",
+      "chunked<VT>": "CL-safe",
+      "CHUNKED": "CL-safe",
       "chunked;a=b": "no-response",
-      "chunked, identity": "CL-safe"
+      "chunked, identity": "CL-safe",
+      "identity, chunked": "CL-safe",
+      "dup TE": "CL-safe",
+      "TE obs-fold": "no-response",
+      "xchunked": "no-response"
     },
     "trusted": false,
     "control_responses": 0
@@ -97,8 +139,14 @@
       "chunked": "SMUGGLE",
       "chunked<TAB>": "SMUGGLE",
       "chunked<SP>": "SMUGGLE",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "SMUGGLE",
       "chunked;a=b": "reject 501",
-      "chunked, identity": "reject 400"
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 501",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -110,8 +158,52 @@
       "chunked": "CL-safe",
       "chunked<TAB>": "CL-safe",
       "chunked<SP>": "CL-safe",
+      "chunked<VT>": "CL-safe",
+      "CHUNKED": "CL-safe",
       "chunked;a=b": "CL-safe",
-      "chunked, identity": "CL-safe"
+      "chunked, identity": "CL-safe",
+      "identity, chunked": "CL-safe",
+      "dup TE": "CL-safe",
+      "TE obs-fold": "CL-safe",
+      "xchunked": "CL-safe"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "Tornado",
+    "parser": "tornado",
+    "results": {
+      "chunked": "reject 400",
+      "chunked<TAB>": "reject 400",
+      "chunked<SP>": "reject 400",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "reject 400",
+      "chunked;a=b": "reject 400",
+      "chunked, identity": "reject 400",
+      "identity, chunked": "reject 400",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 400"
+    },
+    "trusted": true,
+    "control_responses": 2
+  },
+  {
+    "name": "Rust hyper",
+    "parser": "hyper",
+    "results": {
+      "chunked": "CL-safe",
+      "chunked<TAB>": "CL-safe",
+      "chunked<SP>": "CL-safe",
+      "chunked<VT>": "reject 400",
+      "CHUNKED": "CL-safe",
+      "chunked;a=b": "reject 400",
+      "chunked, identity": "reject 400",
+      "identity, chunked": "CL-safe",
+      "dup TE": "reject 400",
+      "TE obs-fold": "reject 400",
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2

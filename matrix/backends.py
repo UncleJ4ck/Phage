@@ -143,4 +143,52 @@ s.start
 EOF
 ruby /tmp/s.rb""",
     },
+    {
+        "name": "Tornado",
+        "parser": "tornado",
+        "image": "python:3.12-slim",
+        "port": 9410,
+        "app": r"""pip install -q tornado && cat > /tmp/s.py <<'EOF'
+import tornado.ioloop, tornado.web
+class H(tornado.web.RequestHandler):
+    def get(self): self.write("ok")
+    def post(self): self.write("ok")
+tornado.web.Application([(r"/.*",H)]).listen(9410,address="127.0.0.1")
+tornado.ioloop.IOLoop.current().start()
+EOF
+python /tmp/s.py""",
+    },
+    {
+        "name": "Rust hyper",
+        "parser": "hyper",
+        "image": "rust:1-slim",
+        "port": 9411,
+        "boot": 600,
+        "app": r"""mkdir -p /w/src && cd /w && cat > Cargo.toml <<'EOF'
+[package]
+name="s"
+version="0.1.0"
+edition="2021"
+[dependencies]
+hyper={version="1",features=["server","http1"]}
+hyper-util={version="0.1",features=["tokio"]}
+http-body-util="0.1"
+tokio={version="1",features=["full"]}
+EOF
+cat > src/main.rs <<'EOF'
+use std::convert::Infallible;
+use http_body_util::Full; use hyper::body::Bytes;
+use hyper::{Request,Response}; use hyper::service::service_fn;
+use hyper_util::rt::TokioIo; use tokio::net::TcpListener;
+async fn h(_:Request<hyper::body::Incoming>)->Result<Response<Full<Bytes>>,Infallible>{
+ Ok(Response::new(Full::new(Bytes::from("ok"))))}
+#[tokio::main]
+async fn main(){
+ let l=TcpListener::bind("127.0.0.1:9411").await.unwrap();
+ loop{ let (s,_)=l.accept().await.unwrap();
+  tokio::spawn(async move{ let _=hyper::server::conn::http1::Builder::new()
+   .serve_connection(TokioIo::new(s),service_fn(h)).await;});}}
+EOF
+cargo run --release -q""",
+    },
 ]

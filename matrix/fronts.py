@@ -126,4 +126,53 @@ frontends = [ {{ address = "127.0.0.1:9485", hostname = "lab" }} ]
 backends = [ {{ address = "127.0.0.1:{up}", backend_id = "b1" }} ]
 """,
     },
+    {
+        "name": "Apache httpd 2.4",
+        "image": "httpd:2.4",
+        "port": 9486,
+        "config_path": "/usr/local/apache2/conf/httpd.conf",
+        "config": """ServerName lab
+Listen 127.0.0.1:9486
+LoadModule mpm_event_module modules/mod_mpm_event.so
+LoadModule authz_core_module modules/mod_authz_core.so
+LoadModule unixd_module modules/mod_unixd.so
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+ErrorLog /dev/null
+ProxyPass / http://127.0.0.1:{up}/
+ProxyPassReverse / http://127.0.0.1:{up}/
+""",
+    },
+    {
+        "name": "Envoy 1.31",
+        "image": "envoyproxy/envoy:v1.31-latest",
+        "port": 9487,
+        "config_path": "/etc/envoy/envoy.yaml",
+        "args": ["-c", "/etc/envoy/envoy.yaml", "-l", "error"],
+        "config": """static_resources:
+  listeners:
+  - address: {{ socket_address: {{ address: 127.0.0.1, port_value: 9487 }} }}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: e
+          route_config:
+            virtual_hosts:
+            - name: a
+              domains: ["*"]
+              routes: [ {{ match: {{ prefix: "/" }}, route: {{ cluster: c }} }} ]
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config: {{ "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router }}
+  clusters:
+  - name: c
+    load_assignment:
+      cluster_name: c
+      endpoints:
+      - lb_endpoints:
+        - endpoint: {{ address: {{ socket_address: {{ address: 127.0.0.1, port_value: {up} }} }} }}
+""",
+    },
 ]

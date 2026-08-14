@@ -101,13 +101,13 @@ def classify(head, resp):
     return "unknown"
 
 
-def probe(port, te):
+def probe(port, hdr):
     body = b"0\r\n\r\nGET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
     head_line = b"POST /carrier HTTP/1.1\r\nHost: lab\r\nContent-Length: %d\r\n" % len(
         body
     )
-    if te:
-        head_line += b"Transfer-Encoding: %s\r\n" % te
+    if hdr:
+        head_line += hdr + b"\r\n"
     req = head_line + b"\r\n" + body
     with _lock:
         CAPTURED.clear()
@@ -178,8 +178,8 @@ def run(spec):
         row["reachable"] = bool(ctl)
         if not row["reachable"]:
             print("    CONTROL FAILED: nothing reached the origin, verdicts untrusted")
-        for label, te in VARIANTS:
-            h, resp = probe(spec["port"], te)
+        for label, hdr in VARIANTS:
+            h, resp = probe(spec["port"], hdr)
             verdict = classify(h, resp)
             row["results"][label] = verdict
             print(f"    {label:20} {verdict}")

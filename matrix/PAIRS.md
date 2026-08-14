@@ -1,6 +1,6 @@
 # Predicted desync pairs
 
-5 fronts x 9 backends = 45 pairs, computed from 14 measurements.
+7 fronts x 11 backends = 77 pairs, computed from 18 measurements.
 
 A pair is predicted when the front forwards a framing value it did not act on and
 the backend honors that same value, so the two disagree about where the message

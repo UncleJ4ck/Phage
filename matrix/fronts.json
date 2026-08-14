@@ -5,8 +5,14 @@
       "chunked": "normalized",
       "chunked<TAB>": "normalized",
       "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
       "chunked;a=b": "rejected 400",
-      "chunked, identity": "rejected 400"
+      "chunked, identity": "rejected 400",
+      "identity, chunked": "rejected 422",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
     },
     "reachable": true
   },
@@ -16,8 +22,14 @@
       "chunked": "rejected 400",
       "chunked<TAB>": "rejected 501",
       "chunked<SP>": "rejected 400",
+      "chunked<VT>": "rejected 501",
+      "CHUNKED": "rejected 400",
       "chunked;a=b": "rejected 501",
-      "chunked, identity": "rejected 501"
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -27,8 +39,14 @@
       "chunked": "normalized",
       "chunked<TAB>": "normalized",
       "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
       "chunked;a=b": "rejected 501",
-      "chunked, identity": "rejected 501"
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 501",
+      "TE obs-fold": "rejected 501",
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -38,8 +56,14 @@
       "chunked": "normalized",
       "chunked<TAB>": "normalized",
       "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
       "chunked;a=b": "rejected 501",
-      "chunked, identity": "rejected 501"
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 501",
+      "TE obs-fold": "rejected 501",
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -49,8 +73,48 @@
       "chunked": "normalized",
       "chunked<TAB>": "FORWARDS-BOTH",
       "chunked<SP>": "FORWARDS-BOTH",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
       "chunked;a=b": "FORWARDS-BOTH",
-      "chunked, identity": "FORWARDS-BOTH"
+      "chunked, identity": "FORWARDS-BOTH",
+      "identity, chunked": "normalized",
+      "dup TE": "normalized",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "normalized"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Apache httpd 2.4",
+    "results": {
+      "chunked": "stripped",
+      "chunked<TAB>": "stripped",
+      "chunked<SP>": "stripped",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "stripped",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "rejected 400",
+      "identity, chunked": "rejected 500",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Envoy 1.31",
+    "results": {
+      "chunked": "rejected 400",
+      "chunked<TAB>": "rejected 400",
+      "chunked<SP>": "rejected 400",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "rejected 400",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "rejected 400",
+      "identity, chunked": "rejected 400",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
     },
     "reachable": true
   }
