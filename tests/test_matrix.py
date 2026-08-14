@@ -58,13 +58,10 @@ class TestBackendClassify(unittest.TestCase):
         # the declared length must cover the whole hidden body, else the test case is
         # malformed for a reason that has nothing to do with the server
         head, _, body = req.partition(b"\r\n\r\n")
-        declared = int(
-            [
-                ln
-                for ln in head.split(b"\r\n")
-                if ln.lower().startswith(b"content-length")
-            ][0].split(b":")[1]
+        cl_line = next(
+            ln for ln in head.split(b"\r\n") if ln.lower().startswith(b"content-length")
         )
+        declared = int(cl_line.split(b":")[1])
         self.assertEqual(declared, len(body))
 
     def test_every_variant_is_a_wellformed_header_block(self):
