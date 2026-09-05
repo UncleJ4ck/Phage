@@ -33,6 +33,7 @@ import socket
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -59,7 +60,7 @@ VARIANTS = [
 ]
 
 SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
-CONTAINER = "phage_matrix_target"
+CONTAINER = "phage_matrix_target"  # suffixed per spec so specs can run side by side
 
 
 def _responses(data: bytes) -> int:
@@ -132,12 +133,17 @@ def classify(resp: bytes) -> str:
     return "CL-safe"
 
 
+def container_for(spec) -> str:
+    return f"{CONTAINER}_{spec['port']}"
+
+
 def docker(*args, **kw):
     return subprocess.run(["docker", *args], capture_output=True, text=True, **kw)
 
 
 def start(spec) -> bool:
-    docker("rm", "-f", CONTAINER)
+    name = container_for(spec)
+    docker("rm", "-f", name)
     # host networking + an explicit loopback bind inside the app: these toy servers must
     # never be reachable off-box.
     r = docker(
@@ -191,7 +197,7 @@ def run(spec) -> dict:
             row["results"][label] = verdict
             print(f"    {label:20} {verdict}")
     finally:
-        docker("rm", "-f", CONTAINER)
+        docker("rm", "-f", container_for(spec))
     return row
 
 
@@ -241,11 +247,29 @@ def to_markdown(rows) -> str:
     return "\n".join(out)
 
 
+def prepull(specs) -> None:
+    """Fetch every image up front, in parallel. Otherwise the first probe of a cold
+    image is racing a download against the boot timeout, and a slow link looks like a
+    backend that would not start."""
+    images = sorted({s["image"] for s in specs})
+    print(f"pre-pulling {len(images)} image(s)")
+    with ThreadPoolExecutor(max_workers=len(images)) as pool:
+        for img, r in zip(images, pool.map(lambda i: docker("pull", "-q", i), images)):
+            if r.returncode != 0:
+                print(f"  pull failed: {img}: {r.stderr.strip()[:120]}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="HTTP framing honor matrix")
     ap.add_argument("--only", help="comma-separated substrings of backend names")
     ap.add_argument("--json", default="matrix/results.json")
     ap.add_argument("--md", default="matrix/MATRIX.md")
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="measure this many backends at once (each binds its own port)",
+    )
     args = ap.parse_args()
 
     specs = BACKENDS
@@ -256,8 +280,13 @@ def main() -> int:
         print("no backends matched")
         return 1
 
-    print(f"measuring {len(specs)} backend(s)")
-    rows = [run(s) for s in specs]
+    print(f"measuring {len(specs)} backend(s), jobs={args.jobs}")
+    prepull(specs)
+    if args.jobs > 1:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            rows = list(pool.map(run, specs))
+    else:
+        rows = [run(s) for s in specs]
 
     Path(args.json).parent.mkdir(parents=True, exist_ok=True)
     Path(args.json).write_text(json.dumps(rows, indent=2) + "\n")

@@ -1,6 +1,6 @@
 [
   {
-    "name": "HAProxy 3.2",
+    "name": "HAProxy 3.0",
     "results": {
       "chunked": "normalized",
       "chunked<TAB>": "normalized",
@@ -8,16 +8,16 @@
       "chunked<VT>": "rejected 400",
       "CHUNKED": "normalized",
       "chunked;a=b": "rejected 400",
-      "chunked, identity": "no-forward",
+      "chunked, identity": "rejected 400",
       "identity, chunked": "rejected 422",
-      "dup TE": "no-forward",
+      "dup TE": "rejected 400",
       "TE obs-fold": "rejected 400",
       "xchunked": "rejected 400"
     },
     "reachable": true
   },
   {
-    "name": "nginx 1.31",
+    "name": "nginx 1.27",
     "results": {
       "chunked": "rejected 400",
       "chunked<TAB>": "rejected 501",
@@ -51,7 +51,7 @@
     "reachable": true
   },
   {
-    "name": "Traefik 3.7",
+    "name": "Traefik 3",
     "results": {
       "chunked": "normalized",
       "chunked<TAB>": "normalized",
@@ -102,7 +102,7 @@
     "reachable": true
   },
   {
-    "name": "Envoy 1.39",
+    "name": "Envoy 1.31",
     "results": {
       "chunked": "rejected 400",
       "chunked<TAB>": "rejected 400",

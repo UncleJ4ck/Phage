@@ -29,6 +29,7 @@ import socket
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -166,7 +167,12 @@ def start(spec):
 
 
 def run(spec):
-    row = {"name": spec["name"], "results": {}, "reachable": False}
+    row = {
+        "name": spec["name"],
+        "id": spec.get("id"),
+        "results": {},
+        "reachable": False,
+    }
     print(f"  {spec['name']}")
     if not start(spec):
         row["error"] = "failed to start"
@@ -188,6 +194,19 @@ def run(spec):
     return row
 
 
+def prepull(specs):
+    """Fetch images in parallel before measuring. The fronts themselves stay serial:
+    they all report into one recording origin and one capture buffer, so running two at
+    once would interleave captures and attribute a proxy's bytes to its neighbour. Speed
+    is not worth a silently wrong verdict here."""
+    images = sorted({sp["image"] for sp in specs})
+    print(f"pre-pulling {len(images)} image(s)")
+    with ThreadPoolExecutor(max_workers=len(images)) as pool:
+        for img, r in zip(images, pool.map(lambda i: docker("pull", "-q", i), images)):
+            if r.returncode != 0:
+                print(f"  pull failed: {img}: {r.stderr.strip()[:120]}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="front-side framing measurement")
     ap.add_argument("--only")
@@ -203,6 +222,7 @@ def main():
     threading.Thread(target=origin, args=(stop,), daemon=True).start()
     time.sleep(0.5)
     try:
+        prepull(specs)
         print(f"measuring {len(specs)} front(s)")
         rows = [run(s) for s in specs]
     finally:

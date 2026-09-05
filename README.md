@@ -59,6 +59,7 @@ each](https://cornfield.sh/half-a-vulnerability-each/).
 - [Framing honor matrix](#framing-honor-matrix)
   - [Adding a target](#adding-a-target)
   - [The control gate](#the-control-gate)
+  - [Drift](#drift)
 - [Evolutionary desync search](#evolutionary-desync-search)
 - [Research](#research)
 - [Contributing](#contributing)
@@ -366,6 +367,23 @@ python matrix/run_matrix.py     # back half  -> matrix/MATRIX.md, matrix/results
 python matrix/run_fronts.py     # front half -> matrix/fronts.json
 python matrix/pairs.py          # join       -> matrix/PAIRS.md
 ```
+
+## Drift
+
+A matrix measured once rots. The population ships new releases and the table quietly stops
+describing anything real, so `drift.py` compares a run against an earlier one and classifies
+every verdict that moved:
+
+```bash
+python matrix/drift.py --baseline matrix/history/<date>-backends.json \
+                       --current  matrix/results.json
+```
+
+`REGRESSION` means a stack that used to reject or normalize a malformed framing header now
+honors or forwards it, which is a parser that got more lenient between releases and the case
+worth an advisory. `FIX` is the reverse. `NEUTRAL` is a move that does not cross the
+safe/unsafe line, such as a changed reject code. It exits 1 on any regression, so a scheduled
+run can gate on it. Keep each run under `matrix/history/` to have something to diff against.
 
 The two measurement scripts take `--only <substring>` to run a subset;
 `pairs.py` just joins the JSON the other two wrote. Every backend and front runs

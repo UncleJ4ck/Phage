@@ -18,7 +18,7 @@ BACKENDS = [
     {
         "name": "Go net/http",
         "parser": "net/http",
-        "image": "golang:1.23-alpine",
+        "image": "golang:1-alpine",
         "port": 9401,
         "app": r"""cat > /tmp/s.go <<'EOF'
 package main
@@ -31,9 +31,9 @@ EOF
 go run /tmp/s.go""",
     },
     {
-        "name": "Node 22",
+        "name": "Node 26",
         "parser": "llhttp",
-        "image": "node:22-alpine",
+        "image": "node:26-alpine",
         "port": 9402,
         "app": r"""cat > /tmp/s.js <<'EOF'
 require('http').createServer((q,s)=>s.end('ok')).listen(9402,'127.0.0.1');

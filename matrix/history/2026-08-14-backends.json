@@ -19,7 +19,7 @@
     "control_responses": 2
   },
   {
-    "name": "Node 26",
+    "name": "Node 22",
     "parser": "llhttp",
     "results": {
       "chunked": "reject 400",

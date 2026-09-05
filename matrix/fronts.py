@@ -21,8 +21,9 @@ UPSTREAM_PORT = 9490
 
 FRONTS = [
     {
-        "name": "HAProxy 3.0",
-        "image": "haproxytech/haproxy-alpine:3.0",
+        "name": "HAProxy 3.2",
+        "id": "haproxy",
+        "image": "haproxytech/haproxy-alpine:3.2",
         "port": 9481,
         "config_path": "/usr/local/etc/haproxy/haproxy.cfg",
         "config": """global
@@ -40,8 +41,9 @@ backend b
 """,
     },
     {
-        "name": "nginx 1.27",
-        "image": "nginx:1.27",
+        "name": "nginx 1.31",
+        "id": "nginx",
+        "image": "nginx:1.31",
         "port": 9482,
         "config_path": "/etc/nginx/nginx.conf",
         "config": """events {{}}
@@ -58,6 +60,7 @@ http {{
     },
     {
         "name": "Caddy 2",
+        "id": "caddy",
         "image": "caddy:2",
         "port": 9483,
         "config_path": "/etc/caddy/Caddyfile",
@@ -70,8 +73,9 @@ http {{
 """,
     },
     {
-        "name": "Traefik 3",
-        "image": "traefik:v3.1",
+        "name": "Traefik 3.7",
+        "id": "traefik",
+        "image": "traefik:v3.7",
         "port": 9484,
         "config_path": "/etc/traefik/traefik.yml",
         "config": """entryPoints:
@@ -104,6 +108,7 @@ http:
         # back FORWARDS-BOTH on the whitespace variants, the instrument is broken and
         # every "safe" verdict above it is noise.
         "name": "sozu 2.1.0 (control, known-vulnerable)",
+        "id": "sozu-control",
         "image": "clevercloud/sozu:2.1.0",
         "port": 9485,
         "boot": 120,
@@ -128,6 +133,7 @@ backends = [ {{ address = "127.0.0.1:{up}", backend_id = "b1" }} ]
     },
     {
         "name": "Apache httpd 2.4",
+        "id": "httpd",
         "image": "httpd:2.4",
         "port": 9486,
         "config_path": "/usr/local/apache2/conf/httpd.conf",
@@ -144,8 +150,9 @@ ProxyPassReverse / http://127.0.0.1:{up}/
 """,
     },
     {
-        "name": "Envoy 1.31",
-        "image": "envoyproxy/envoy:v1.31-latest",
+        "name": "Envoy 1.39",
+        "id": "envoy",
+        "image": "envoyproxy/envoy:v1.39-latest",
         "port": 9487,
         "config_path": "/etc/envoy/envoy.yaml",
         "args": ["-c", "/etc/envoy/envoy.yaml", "-l", "error"],
