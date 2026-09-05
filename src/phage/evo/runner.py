@@ -207,6 +207,7 @@ def _live_run_case(
     from aioquic.quic.configuration import QuicConfiguration
 
     from .driver import drive, drive_multi
+    from .quic_ext import enable_reliable_reset
     from .safety import assert_local
 
     class _NoStreamAdapter(QuicConnectionProtocol):
@@ -234,6 +235,11 @@ def _live_run_case(
             async with connect(
                 host, port, configuration=cfg, create_protocol=_NoStreamAdapter
             ) as client:
+                # aioquic has no RESET_STREAM_AT, so the ResetStreamAt gene needs the
+                # instance patched before it can reach the wire. Without this the op
+                # raises AttributeError inside drive(), the frame is never sent, and the
+                # genome is still scored as though it fired.
+                enable_reliable_reset(client._quic)
                 http = H3Connection(client._quic)
                 if streams > 1:
                     sids = [
@@ -340,6 +346,7 @@ def drive_early_data(host, port, genome, session_ticket, raw=False, settle=1.0):
 
     from .driver import drive
     from .safety import assert_local
+    from .quic_ext import enable_reliable_reset
 
     assert_local(f"https://{host}:{port}/")
 
@@ -361,6 +368,7 @@ def drive_early_data(host, port, genome, session_ticket, raw=False, settle=1.0):
             wait_connected=False,
         ) as client:
             q = client._quic
+            enable_reliable_reset(q)  # same reason as the live path above
             http = H3Connection(q)
             sid = q.get_next_available_stream_id()
             z = q._cryptos.get(Epoch.ZERO_RTT)

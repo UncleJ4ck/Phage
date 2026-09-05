@@ -29,9 +29,30 @@ import json
 import sys
 from pathlib import Path
 
-# The verdicts that mean "this side of the pair would participate in a desync". Everything
-# else (reject, CL-safe, normalized, stripped) is a refusal to play.
+# The verdicts that mean "this side of the pair would participate in a desync".
 UNSAFE = {"SMUGGLE", "FORWARDS-BOTH"}
+
+# Everything a harness can legitimately conclude. The set has to be closed, because the
+# obvious `after not in UNSAFE` test treats ANY other string as a refusal to play, and the
+# strings that reach here are not all measurements: run_matrix writes "error: ..." straight
+# into results, and a front that dies mid-run yields "no-forward". Scored the naive way, a
+# crashed calibration row reads as four security FIXes and the run exits 0.
+# Both spellings on purpose: the backend harness emits "reject 400" and the front
+# harness "rejected 400". They are separate vocabularies and both are real refusals.
+SAFE = {"reject", "rejected", "CL-safe", "normalized", "stripped"}
+UNMEASURED = {"no-forward", "no-response", "unknown"}
+
+
+def _kind(verdict: str) -> str:
+    """unsafe / safe / unmeasured. An unrecognised verdict is never assumed safe."""
+    if verdict in UNSAFE:
+        return "unsafe"
+    if verdict.startswith("error:") or verdict in UNMEASURED:
+        return "unmeasured"
+    # "reject 400", "reject 501" and friends carry a code after the word
+    if verdict.split(" ")[0] in SAFE or verdict in SAFE:
+        return "safe"
+    return "unmeasured"
 
 
 def load(path):
@@ -40,10 +61,18 @@ def load(path):
 
 
 def direction(before, after):
-    was, now = before in UNSAFE, after in UNSAFE
-    if now and not was:
+    """REGRESSION / FIX / NEUTRAL / UNMEASURED.
+
+    UNMEASURED exists so that losing a measurement can never be reported as a security
+    improvement. A front that crashes after the control probe returns "no-forward" for
+    every remaining variant, and calling that a FIX is how a broken run gets published as
+    a fixed one."""
+    a, b = _kind(before), _kind(after)
+    if b == "unmeasured" and a != "unmeasured":
+        return "UNMEASURED"
+    if b == "unsafe" and a != "unsafe":
         return "REGRESSION"
-    if was and not now:
+    if a == "unsafe" and b == "safe":
         return "FIX"
     return "NEUTRAL"
 
@@ -150,7 +179,7 @@ def main():
         return 0
 
     print(f"\n{len(moves)} verdict(s) moved:\n")
-    for kind in ("REGRESSION", "FIX", "NEUTRAL"):
+    for kind in ("REGRESSION", "UNMEASURED", "FIX", "NEUTRAL"):
         rows = [m for m in moves if m["direction"] == kind]
         if not rows:
             continue
@@ -160,11 +189,21 @@ def main():
         print()
 
     regressions = [m for m in moves if m["direction"] == "REGRESSION"]
+    unmeasured = [m for m in moves if m["direction"] == "UNMEASURED"]
     if regressions:
         print(
             f"{len(regressions)} regression(s): a parser got more lenient. Investigate."
         )
         return 1
+    if unmeasured:
+        # Not a security change, but not a clean run either. Reported before any FIX is
+        # believed, because the cell that stopped measuring is exactly the one whose
+        # improvement you would otherwise celebrate.
+        print(
+            f"{len(unmeasured)} cell(s) stopped measuring. That is a broken run, not a "
+            "fixed one. Fix the run before trusting anything else in it."
+        )
+        return 2
     return 0
 
 

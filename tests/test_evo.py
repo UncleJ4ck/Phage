@@ -1002,6 +1002,40 @@ class TestCveClassGenes(unittest.TestCase):
             encode_reset_stream_at(4, 1, 8, 0), bytes.fromhex("2404010800")
         )
 
+    def test_every_runner_connection_installs_the_reliable_reset_patch(self):
+        """aioquic has no RESET_STREAM_AT, so a connection that is not patched makes the
+        ResetStreamAt gene raise inside drive() and never reach the wire, while the genome
+        is still scored as though it fired. The defect was a wiring gap rather than a logic
+        error: the patch existed and was unit-tested, and nothing in the shipped package
+        called it. So the guard has to be structural."""
+        import ast
+        from pathlib import Path as _P
+
+        src = _P(__file__).resolve().parent.parent / "src/phage/evo/runner.py"
+        tree = ast.parse(src.read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # only the functions that actually drive a genome need it. capture_session_ticket
+            # opens a connection to collect a ticket and never sends an op, so requiring the
+            # patch there would be a guard that fails for the wrong reason.
+            drives = any(
+                isinstance(n, ast.Call) and getattr(n.func, "id", None) == "drive"
+                for n in ast.walk(fn)
+            )
+            if not drives:
+                continue
+            installs = any(
+                isinstance(n, ast.Call)
+                and getattr(n.func, "id", None) == "enable_reliable_reset"
+                for n in ast.walk(fn)
+            )
+            self.assertTrue(
+                installs,
+                f"{fn.name} opens a QUIC connection without enable_reliable_reset, so a "
+                "ResetStreamAt op there would fail silently",
+            )
+
     def test_varint_matches_rfc9000_at_every_length_boundary(self):
         # an independent reading of RFC 9000 section 16, not a copy of the implementation
         from phage.evo.quic_ext import encode_reset_stream_at

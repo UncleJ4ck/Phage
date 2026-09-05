@@ -87,7 +87,12 @@ def classify(head, resp):
     if not head:
         if resp:
             parts = resp.split(b"\r\n", 1)[0].split(b" ")
-            if len(parts) > 1 and parts[1][:1] in (b"4", b"5"):
+            # only a real status line; transport errors arrive on their own channel now
+            if (
+                len(parts) > 2
+                and parts[0].startswith(b"HTTP/")
+                and parts[1][:1] in (b"4", b"5")
+            ):
                 return f"rejected {parts[1].decode(errors='replace')}"
         return "no-forward"
     low = head.lower()
@@ -127,10 +132,14 @@ def probe(port, hdr):
             out += d
         s.close()
     except OSError as exc:
-        return b"", str(exc).encode()
+        # A transport failure is not a measurement. Returning it in the response slot made
+        # classify() read the errno digit as a status code and answer "no-forward", which
+        # is indistinguishable from a proxy that forwarded nothing. A front that died
+        # mid-run then published as safe, and drift scored it a FIX.
+        return b"", b"", f"{type(exc).__name__}: {exc}"
     time.sleep(0.3)
     with _lock:
-        return (CAPTURED[0] if CAPTURED else b""), out
+        return (CAPTURED[0] if CAPTURED else b""), out, None
 
 
 def start(spec):
@@ -180,13 +189,13 @@ def run(spec):
     try:
         # control: a request with no Transfer-Encoding at all must reach the origin,
         # otherwise the front is not wired to it and every verdict below is meaningless.
-        ctl, _ = probe(spec["port"], b"")
+        ctl, _, _ = probe(spec["port"], b"")
         row["reachable"] = bool(ctl)
         if not row["reachable"]:
             print("    CONTROL FAILED: nothing reached the origin, verdicts untrusted")
         for label, hdr in VARIANTS:
-            h, resp = probe(spec["port"], hdr)
-            verdict = classify(h, resp)
+            h, resp, err = probe(spec["port"], hdr)
+            verdict = classify(h, resp) if not err else f"error: {err}"
             row["results"][label] = verdict
             print(f"    {label:20} {verdict}")
     finally:
