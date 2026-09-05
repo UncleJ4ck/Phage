@@ -1002,6 +1002,34 @@ class TestCveClassGenes(unittest.TestCase):
             encode_reset_stream_at(4, 1, 8, 0), bytes.fromhex("2404010800")
         )
 
+    def test_varint_matches_rfc9000_at_every_length_boundary(self):
+        # an independent reading of RFC 9000 section 16, not a copy of the implementation
+        from phage.evo.quic_ext import encode_reset_stream_at
+
+        def field(n):
+            return encode_reset_stream_at(n, 0, 0, 0)[1:-3]
+
+        for n, want in [
+            (0, "00"),
+            (63, "3f"),
+            (64, "4040"),
+            (16383, "7fff"),
+            (16384, "80004000"),
+            (2**30 - 1, "bfffffff"),
+            (2**30, "c000000040000000"),
+            (2**62 - 1, "ffffffffffffffff"),
+        ]:
+            self.assertEqual(field(n).hex(), want, f"varint {n}")
+
+    def test_varint_refuses_a_value_it_cannot_represent(self):
+        # 2**62 used to wrap into the length bits and go out as 0. A fuzzer trying extreme
+        # values would then report sending something it never sent.
+        from phage.evo.quic_ext import encode_reset_stream_at
+
+        for n in (2**62, 2**64 - 1, -1):
+            with self.assertRaises(ValueError):
+                encode_reset_stream_at(n, 0, 0, 0)
+
     def test_enable_reliable_reset_queues(self):
         # enable_reliable_reset gives a send_reset_stream_at that queues a frame; idempotent.
         from phage.evo.quic_ext import enable_reliable_reset

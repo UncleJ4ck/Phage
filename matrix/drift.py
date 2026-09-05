@@ -100,7 +100,21 @@ def compare(base, cur):
                 }
             )
     vanished = [n for n in base if n not in matched_base]
-    return moves, appeared, vanished
+    # A row that measured before and measures nothing now is a BROKEN run, not a clean one.
+    # This is the failure that motivated the check: 10 of 11 backends failed to start and
+    # every one of them carried an empty results dict, so the per-variant loop above simply
+    # never ran and the whole thing reported "no verdict changed". Silence from a row that
+    # used to speak is the loudest signal here, so it is surfaced separately and it fails.
+    broken = [
+        {
+            "name": name,
+            "was": len(pairs[name].get("results", {})),
+            "error": row.get("error", "no results"),
+        }
+        for name, row in cur.items()
+        if name in pairs and not row.get("results") and pairs[name].get("results")
+    ]
+    return moves, appeared, vanished, broken
 
 
 def main():
@@ -110,7 +124,7 @@ def main():
     args = ap.parse_args()
 
     base, cur = load(args.baseline), load(args.current)
-    moves, appeared, vanished = compare(base, cur)
+    moves, appeared, vanished, broken = compare(base, cur)
 
     print(f"baseline: {args.baseline}")
     print(f"current : {args.current}")
@@ -119,6 +133,17 @@ def main():
         print(f"  added  : {', '.join(appeared)}")
     if vanished:
         print(f"  removed: {', '.join(vanished)}")
+
+    if broken:
+        print(
+            f"\nBROKEN: {len(broken)} row(s) measured before and measure nothing now:"
+        )
+        for b in broken:
+            print(f"    {b['name']:34} had {b['was']} verdict(s), now: {b['error']}")
+        print(
+            "  This is not a clean result. Fix the run before trusting any verdict in it."
+        )
+        return 2
 
     if not moves:
         print("\nno verdict changed.")

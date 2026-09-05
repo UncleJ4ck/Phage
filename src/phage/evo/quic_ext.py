@@ -74,6 +74,13 @@ def encode_reset_stream_at(stream_id, error_code, final_size, reliable_size):
     """The exact on-wire frame bytes (type + four varints), for tests and byte checks."""
 
     def uvarint(n):
+        # RFC 9000 section 16 caps a varint at 2**62-1. Past that the OR below silently
+        # wraps into the two length bits and encodes a different number: 2**62 goes out as
+        # c000000000000000, which reads back as 0. A fuzzer is exactly the caller that
+        # tries extreme values, so a wrong-but-quiet encoding would have it report sending
+        # something it never sent. Refuse instead.
+        if not 0 <= n < 0x4000000000000000:
+            raise ValueError(f"{n} is outside the QUIC varint range (0 to 2**62-1)")
         if n < 0x40:
             return bytes([n])
         if n < 0x4000:

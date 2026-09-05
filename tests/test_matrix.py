@@ -123,27 +123,27 @@ class TestDrift(unittest.TestCase):
 
     def test_leniency_is_a_regression(self):
         # a parser that used to refuse the value now honors it: the alarm case
-        moves, _, _ = drift.compare(
+        moves, _, _, _ = drift.compare(
             self._index(self.BASE),
             self._index(self._cur(**{"chunked<TAB>": "SMUGGLE"})),
         )
         self.assertEqual([m["direction"] for m in moves], ["REGRESSION"])
 
     def test_tightening_is_a_fix_not_an_alarm(self):
-        moves, _, _ = drift.compare(
+        moves, _, _, _ = drift.compare(
             self._index(self.BASE), self._index(self._cur(chunked="reject 400"))
         )
         self.assertEqual([m["direction"] for m in moves], ["FIX"])
 
     def test_a_different_reject_code_is_not_a_security_move(self):
-        moves, _, _ = drift.compare(
+        moves, _, _, _ = drift.compare(
             self._index(self.BASE),
             self._index(self._cur(**{"chunked<TAB>": "reject 501"})),
         )
         self.assertEqual([m["direction"] for m in moves], ["NEUTRAL"])
 
     def test_identical_runs_report_nothing(self):
-        moves, added, removed = drift.compare(
+        moves, added, removed, _ = drift.compare(
             self._index(self.BASE), self._index(self.BASE)
         )
         self.assertEqual((moves, added, removed), ([], [], []))
@@ -151,7 +151,7 @@ class TestDrift(unittest.TestCase):
     def test_forwards_both_counts_as_unsafe_on_the_front_side(self):
         base = {"p": {"name": "p", "results": {"v": "normalized"}}}
         cur = {"p": {"name": "p", "results": {"v": "FORWARDS-BOTH"}}}
-        moves, _, _ = drift.compare(base, cur)
+        moves, _, _, _ = drift.compare(base, cur)
         self.assertEqual(moves[0]["direction"], "REGRESSION")
 
     def test_a_version_bump_renames_the_row_and_is_still_compared(self):
@@ -170,7 +170,7 @@ class TestDrift(unittest.TestCase):
                 "results": {"v": "SMUGGLE"},
             }
         }
-        moves, added, removed = drift.compare(base, cur)
+        moves, added, removed, _ = drift.compare(base, cur)
         self.assertEqual((added, removed), ([], []))
         self.assertEqual(moves[0]["direction"], "REGRESSION")
         self.assertEqual(moves[0]["name"], "Node 22 -> Node 26")
@@ -193,7 +193,7 @@ class TestDrift(unittest.TestCase):
         cur = {
             "Quart": {"name": "Quart", "parser": "h11", "results": {"v": "reject 400"}}
         }
-        moves, added, _ = drift.compare(base, cur)
+        moves, added, _, _ = drift.compare(base, cur)
         self.assertEqual(moves, [])
         self.assertEqual(added, ["Quart"])
 
@@ -213,7 +213,7 @@ class TestDrift(unittest.TestCase):
                 "results": {"dup TE": "FORWARDS-BOTH"},
             }
         }
-        moves, added, removed = drift.compare(base, cur)
+        moves, added, removed, _ = drift.compare(base, cur)
         self.assertEqual((added, removed), ([], []))
         self.assertEqual(moves[0]["direction"], "REGRESSION")
 
@@ -232,15 +232,93 @@ class TestDrift(unittest.TestCase):
                 "results": {"v": "FORWARDS-BOTH"},
             }
         }
-        moves, added, _ = drift.compare(base, cur)
+        moves, added, _, _ = drift.compare(base, cur)
         self.assertEqual((moves, added), ([], ["Pingora 0.4"]))
 
+    def test_a_row_that_stops_measuring_is_broken_not_clean(self):
+        # the failure that motivated this: 10 of 11 backends failed to start, every row
+        # carried an empty results dict, and the diff reported "no verdict changed"
+        base = {"srv": {"name": "srv", "results": {"v": "SMUGGLE"}}}
+        cur = {"srv": {"name": "srv", "results": {}, "error": "failed to start"}}
+        moves, added, removed, broken = drift.compare(base, cur)
+        self.assertEqual(moves, [])
+        self.assertEqual(len(broken), 1)
+        self.assertEqual(broken[0]["was"], 1)
+
+    def test_a_row_that_never_measured_is_not_reported_broken(self):
+        # nothing was lost if there was nothing there, so this must stay quiet
+        base = {"srv": {"name": "srv", "results": {}}}
+        cur = {"srv": {"name": "srv", "results": {}, "error": "failed to start"}}
+        _, _, _, broken = drift.compare(base, cur)
+        self.assertEqual(broken, [])
+
     def test_added_and_removed_rows_are_reported(self):
-        moves, added, removed = drift.compare(
+        moves, added, removed, _ = drift.compare(
             {"gone": {"name": "gone", "results": {}}},
             {"fresh": {"name": "fresh", "results": {}}},
         )
         self.assertEqual((added, removed), (["fresh"], ["gone"]))
+
+
+class TestResponseCounting(unittest.TestCase):
+    """The counter decides every backend verdict, so a false SMUGGLE here becomes a false
+    published vulnerability claim. These pin the two ways substring counting got it wrong,
+    and the cases proving the fix did not simply silence the signal."""
+
+    OK = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+
+    def test_a_body_quoting_a_status_line_is_not_a_second_response(self):
+        # a log viewer or an error page echoing the request used to score SMUGGLE
+        resp = (
+            b"HTTP/1.1 200 OK\r\nContent-Length: 36\r\n\r\n"
+            b"last request was HTTP/1.1 200 OK ok\n"
+        )
+        self.assertEqual(run_matrix._responses(resp), 1)
+        self.assertEqual(run_matrix.classify(resp), "CL-safe")
+
+    def test_an_interim_1xx_is_not_a_framed_request(self):
+        # "100 Continue" then the real response is one request, and it is legal
+        resp = b"HTTP/1.1 100 Continue\r\n\r\n" + self.OK
+        self.assertEqual(run_matrix._responses(resp), 1)
+        self.assertEqual(run_matrix.classify(resp), "CL-safe")
+
+    def test_an_interim_1xx_does_not_mask_a_real_smuggle(self):
+        # the fix must not become a way to hide the positive
+        resp = b"HTTP/1.1 100 Continue\r\n\r\n" + self.OK + self.OK
+        self.assertEqual(run_matrix.classify(resp), "SMUGGLE")
+
+    def test_a_chunked_body_is_skipped_not_scanned(self):
+        resp = (
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+            b"14\r\nHTTP/1.1 200 OK\r\n xx\r\n0\r\n\r\n"
+        )
+        self.assertEqual(run_matrix.classify(resp), "CL-safe")
+
+    def test_a_response_after_a_chunked_body_still_counts(self):
+        resp = (
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n"
+        ) + self.OK
+        self.assertEqual(run_matrix.classify(resp), "SMUGGLE")
+
+    def test_an_undelimited_body_runs_to_eof(self):
+        # no Content-Length and no chunked: nothing after the body is a second response
+        resp = b"HTTP/1.1 200 OK\r\n\r\nHTTP/1.1 200 OK"
+        self.assertEqual(run_matrix._responses(resp), 1)
+
+    def test_two_real_responses_still_read_as_two(self):
+        self.assertEqual(run_matrix._responses(self.OK + self.OK), 2)
+        self.assertEqual(run_matrix.classify(self.OK + self.OK), "SMUGGLE")
+
+    def test_malformed_input_does_not_raise(self):
+        for junk in (
+            b"",
+            b"\x00\xff not http",
+            b"HTTP/1.1 200 OK\r\nContent-Len",
+            b"HTTP/1.1 200 OK\r\nContent-Length: abc\r\n\r\nx",
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n",
+        ):
+            run_matrix.classify(junk)
+            run_matrix._responses(junk)
 
 
 if __name__ == "__main__":
