@@ -16,6 +16,7 @@ import drift  # noqa: E402
 import pairs as pairs_mod  # noqa: E402
 import run_fronts  # noqa: E402
 import run_matrix  # noqa: E402
+from phage.evo.echo_backend import parse_requests  # noqa: E402
 
 OK = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
 
@@ -821,6 +822,34 @@ class TestOriginPublishesBeforeClose(unittest.TestCase):
         finally:
             stop.set()
             time.sleep(0.6)
+
+
+class TestTECLCarrierCanFire(unittest.TestCase):
+    """The sentinel for the TE.CL column: prove the carrier can produce a positive
+    before its zeroes mean anything. No backend in the population currently frames by
+    Content-Length, so the column reads empty, and an empty column from a row that has
+    never been shown to fire is an untested instrument, not a clean result."""
+
+    def _carrier(self):
+        v = next(x for x in run_matrix.VARIANTS if x.direction == "TE.CL")
+        return v, run_matrix.build(v.header, v.body, v.content_length)
+
+    def test_a_content_length_framing_parser_sees_two_requests(self):
+        # strip the Transfer-Encoding so the walker frames by Content-Length, which is
+        # exactly the behaviour this row is built to catch
+        v, req = self._carrier()
+        cl_only = req.replace(v.header + b"\r\n", b"")
+        self.assertNotIn(b"Transfer-Encoding", cl_only)
+        self.assertEqual(len(parse_requests(cl_only)), 2)
+
+    def test_a_transfer_encoding_framing_parser_sees_one(self):
+        _, req = self._carrier()
+        self.assertEqual(len(parse_requests(req)), 1)
+
+    def test_the_second_request_is_the_hidden_one(self):
+        v, req = self._carrier()
+        cl_only = req.replace(v.header + b"\r\n", b"")
+        self.assertEqual(parse_requests(cl_only)[1].path, b"/SMUGGLED")
 
 
 if __name__ == "__main__":

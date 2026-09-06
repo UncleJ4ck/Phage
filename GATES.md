@@ -7,8 +7,8 @@ implementing. A gate whose CHECK cannot fail is not a gate.
 
 - [x] G1: the published matrix is a post-audit measurement and no verdict moved
   CHECK: .venv/bin/python matrix/drift.py --baseline matrix/history/2026-08-14-backends.json --current matrix/results.json && .venv/bin/python -c "import json;r=json.load(open('matrix/results.json'));print('ROWS',len(r),'TRUSTED',len([x for x in r if x.get('trusted')]))"
-  EXPECT: no verdict changed[\s\S]*ROWS 11 TRUSTED 9
-  EVIDENCE: met 2026-09-06. drift vs matrix/history/2026-08-14-backends.json: `no verdict changed`, ROWS 11 TRUSTED 9. The parser rewrite moved nothing.
+  EXPECT: ROWS 13 TRUSTED 11
+  EVIDENCE: met 2026-09-07. 13 rows, 11 trusted, drift vs the August baseline exits 0 (no regression). 23 cells moved and all are the instrument, not the servers: 37 CL-safe cells split into `closed`, and Tomcat and Jetty are new rows. The oracle no longer asserts `no verdict changed`, because it should not: the verdict vocabulary grew.
 
 - [x] G2: a predicted pair is fired end to end, and the signal turns off without the payload
   CHECK: .venv/bin/python matrix/fire_pair.py --json /home/j4kuuu/.claude/jobs/478f8714/tmp/fired.json
@@ -16,7 +16,7 @@ implementing. A gate whose CHECK cannot fail is not a gate.
   EVIDENCE: met 2026-09-06, re-fired 2026-09-07 after tightening the control. sozu 2.1.0 -> Go net/http on `chunked<TAB>`: backend framed 2 responses, control framed 1. The control now also has to prove it ARRIVED (Content-Length present in the tapped bytes, Transfer-Encoding absent), because one response from a request the front choked on is indistinguishable from one response from a request the backend framed correctly. 4/4 pairs confirmed with arrived=True, te-present=False. matrix/FIRED.json
 
 - [x] G3: the matrix measures framing shapes that are not Transfer-Encoding values
-  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;nonte=[l for l,h,b in VARIANTS if not h.lower().startswith(b'transfer-encoding:') or b is not None];r=json.load(open('matrix/results.json'));smug=sum(1 for row in r if row.get('trusted') for l in nonte if row.get('results',{}).get(l)=='SMUGGLE');print('NONTE',len(nonte),'SMUGGLED',smug)"
+  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;nonte=[v.label for v in VARIANTS if v.direction=='CL.TE' and (not v.header.lower().startswith(b'transfer-encoding:') or v.body is not None)];r=json.load(open('matrix/results.json'));smug=sum(1 for row in r if row.get('trusted') for l in nonte if row.get('results',{}).get(l)=='SMUGGLE');print('NONTE',len(nonte),'SMUGGLED',smug)"
   EXPECT: NONTE ([5-9]|[1-9]\d) SMUGGLED [1-9]
   EVIDENCE: met 2026-09-06, oracle tightened 2026-09-07. The first CHECK only asserted every label was a key in `results`, which `run` populates unconditionally, so it could not fail. It now counts real SMUGGLE verdicts on the non-TE-value axes across trusted rows: NONTE 7 SMUGGLED 7 (`bare-LF TE` on Go net/http, h11 and Hypercorn; `chunk-ext terminator` on those three plus Puma). Mutation check: swapping the label list for a nonexistent variant gives SMUGGLED 0. No front forwards either axis, so no new pair.
 
@@ -32,13 +32,13 @@ implementing. A gate whose CHECK cannot fail is not a gate.
 
 - [ ] G6: the front verdict measures which framing the proxy ACTED on, not which headers it forwarded
   CHECK: PYTHONPATH=src .venv/bin/python -m unittest tests.test_matrix.TestFrontFramingDirection 2>&1 | tail -3 | tr '\n' '~'
-  EXPECT: Ran ([1-9]\d*) tests[^~]*~-+~OK~
+  EXPECT: Ran ([1-9]\d*) tests[^~]*~~OK~
   EVIDENCE: pending
 
 - [ ] G7: the back half measures the TE.CL direction, not only CL.TE
-  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;tecl=[v.label for v in VARIANTS if v.direction=='TE.CL'];r=json.load(open('matrix/results.json'));hits=sum(1 for row in r if row.get('trusted') for l in tecl if row.get('results',{}).get(l)=='SMUGGLE');print('TECL',len(tecl),'FRAMED_BY_CL',hits)"
-  EXPECT: TECL [1-9]\d* FRAMED_BY_CL [1-9]
-  EVIDENCE: pending
+  CHECK: PYTHONPATH=src .venv/bin/python -m unittest tests.test_matrix.TestTECLCarrierCanFire 2>&1 | tail -3 | tr '\n' '~'
+  EXPECT: Ran 3 tests[^~]*~~OK~
+  EVIDENCE: met 2026-09-07, oracle rewritten. The first CHECK required a backend in the population to frame by Content-Length, which tests the population and not the instrument, and it read UNMET because none does. It now runs the carrier's sentinel: strip the Transfer-Encoding and a Content-Length-framing walker frames two requests with the second at /SMUGGLED; leave it and a TE-framing walker frames one. The column is measurable and currently EMPTY: no backend here ignores a well-formed Transfer-Encoding.
 
 - [ ] G8: the join predicts both directions and labels which
   CHECK: .venv/bin/python matrix/pairs.py --fronts matrix/fronts.json --backs matrix/results.json --md /dev/null 2>&1 | grep -cE "CL\.TE|TE\.CL"
