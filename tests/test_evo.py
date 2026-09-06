@@ -1145,6 +1145,48 @@ class TestCveClassGenes(unittest.TestCase):
         finally:
             srv.close()
 
+    def test_proxy_oracle_does_not_hide_a_desync_behind_a_quoted_status_line(self):
+        """proxy.py used to count status lines with a regex over the whole reply, so a
+        proxy response whose body quotes one inflated proxy_resp and the verdict
+        backend_n > proxy_resp came out False. The desync was hidden, not invented, which
+        is why it survived: the failure direction was silence."""
+        import re
+
+        from phage.evo.http1 import _responses
+
+        reply = (
+            b"HTTP/1.1 200 OK\r\nContent-Length: 34\r\n\r\n"
+            b"upstream said HTTP/1.1 200 OK ok\n"
+        )
+        old = len(re.compile(rb"HTTP/1\.[01] (\d\d\d)").findall(reply))
+        self.assertEqual(old, 2, "the old regex saw two replies where there was one")
+        self.assertEqual(_responses(reply), 1)
+        # a backend that framed 2 is a real desync, and only the parser reports it
+        self.assertFalse(2 > old, "old counting hid it")
+        self.assertTrue(2 > _responses(reply), "shared parser surfaces it")
+
+    def test_one_parser_not_two(self):
+        """The duplication was the defect. Two copies of a response reader means two
+        answers to the same question, and the weaker copy decides a verdict somewhere."""
+        from pathlib import Path as _P
+
+        root = _P(__file__).resolve().parent.parent
+        proxy = (root / "src/phage/evo/proxy.py").read_text()
+        matrix = (root / "matrix/run_matrix.py").read_text()
+        # assertNotIn would dump the whole file into the failure message, so assert on
+        # the boolean and say what is wrong in words
+        self.assertFalse(
+            "HTTP/1\\.[01]" in proxy, "proxy.py re-grew its own status-line regex"
+        )
+        self.assertFalse(
+            "def _responses(" in proxy, "proxy.py has a second copy of the parser"
+        )
+        self.assertFalse(
+            "def _responses(" in matrix, "run_matrix.py has a second copy of the parser"
+        )
+        self.assertIn("from phage.evo.http1 import", matrix)
+        self.assertIn("from .http1 import", proxy)
+
     def test_proxy_oracle_errors_when_it_cannot_connect(self):
         import socket
 

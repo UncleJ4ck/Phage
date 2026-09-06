@@ -13,15 +13,13 @@ framing survives to the backend. Read the client to EOF (close makes it
 deterministic), then compare against the backend's logged count."""
 
 import json
-import re
 import socket
 import time
 from typing import Callable
 
+from .http1 import _responses
 from .oracle import Observation
 from .reference import render_h1
-
-_STATUS = re.compile(rb"HTTP/1\.[01] (\d\d\d)")
 
 
 def _inject_close(raw: bytes) -> bytes:
@@ -48,12 +46,8 @@ def make_proxy_run_case(
     backend must append one JSONL record per connection with an `n` count (see
     echo_backend). Deterministic: Connection: close kills the pipelining race.
 
-    Known limit, and it is the fail-safe direction. `_STATUS` counts status lines
-    anywhere in the proxy's reply, so a response body that quotes one inflates
-    proxy_resp. Since the verdict is backend_n > proxy_resp, an inflated proxy_resp can
-    only HIDE a desync, never invent one. A missed finding is honest silence; a
-    manufactured one would be a false claim. Tighten this to a real response-stream walk
-    if a target is ever seen echoing status lines."""
+    Counts replies with the shared response-stream reader, so a proxy reply whose body
+    quotes a status line no longer inflates proxy_resp and hides a real desync."""
 
     def run_case(genome: list) -> Observation:
         raw = _inject_close(render_h1(genome))
@@ -76,7 +70,7 @@ def make_proxy_run_case(
         except OSError:
             return Observation(0, error=True)
         time.sleep(settle)
-        proxy_resp = len(_STATUS.findall(data))
+        proxy_resp = _responses(data)
         backend_n = _read_backend_count(backend_log)
         if proxy_resp == 0:
             return Observation(0, error=True)  # proxy reset/errored, not a smuggle

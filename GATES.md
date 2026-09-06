@@ -65,3 +65,35 @@ written minutes earlier, which is the same trap this project keeps documenting.
 Not fixed, and deliberately so: the substring counting inside `proxy.py`. Sharing the
 response-stream walker would mean moving it out of `matrix/` into the installed package, a
 larger change than a fail-safe direction warrants. Written down instead of silently left.
+
+## Third pass: fuzzing the fix, and the rationalization (2026-09-06)
+
+Asked a third time whether it was really done. Two more.
+
+- [x] **A10 classify invented status codes**: I fuzzed the OLD response counter before
+      replacing it and never fuzzed the replacement. 60,000 adversarial inputs found no
+      hang and no crash, but the verdict distribution carried strings like `reject 4\xff\xfe`,
+      `reject `, `reject OK` and `reject HTTP/1.0`. The refusal test was
+      `b" 4" in first[:13]`, a substring probe rather than a parse, so an unparseable reply
+      was published as a specific rejection code the server never sent, and drift filed it
+      as safe. `_status_code()` now requires the RFC 9112 shape (HTTP/1.x SP three digits)
+      and an unparseable reply is `unknown`, which drift already treats as UNMEASURED.
+      EVIDENCE: re-fuzzed 60,000 inputs. Five distinct verdicts, none outside
+      {SMUGGLE, CL-safe, no-response, unknown, reject NNN}. Zero hangs, zero crashes.
+- [x] **A11 the duplicated parser I talked myself out of fixing**: the previous pass wrote
+      "sharing the real response parser with proxy.py would mean moving it out of matrix/
+      into the installed package, a larger change than a fail-safe flaw warrants". That was
+      a rationalization, and the operator caught it. The real cost was one sys.path line
+      and two imports. `src/phage/evo/http1.py` now holds the single reader; run_matrix and
+      proxy both import it and the dead regex is gone.
+      EVIDENCE: not cosmetic. A proxy reply whose body quotes a status line made the old
+      regex count 2, so `backend_n(2) > proxy_resp(2)` was False and a real desync was
+      HIDDEN. The shared parser counts 1, so 2 > 1 and it is DETECTED. Both that and a
+      no-second-copy invariant are tests; re-growing the regex in proxy.py fails the suite.
+
+Live after both: 11/11 backends, 7/7 fronts, calibration firing, drift clean on both
+halves, and every verdict in the live data inside the closed vocabulary. 273 tests.
+
+The lesson worth keeping: each of the three times I was asked "are you sure", the honest
+answer was no, and the miss was found by attacking from an angle I had not used yet rather
+than by re-reading the same checklist.

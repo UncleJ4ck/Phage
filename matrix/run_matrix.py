@@ -37,7 +37,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from backends import BACKENDS  # noqa: E402
+
+# one parser, shared with the package oracles; two copies means two answers
+from phage.evo.http1 import _responses, _status_code  # noqa: E402
 
 # The framing header blocks under test. Each entry is the raw header line(s) inserted
 # after Content-Length, so a variant can express what a single value cannot: a duplicated
@@ -61,84 +65,6 @@ VARIANTS = [
 
 SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
 CONTAINER = "phage_matrix_target"  # suffixed per spec so specs can run side by side
-
-
-def _responses(data: bytes) -> int:
-    """How many FINAL HTTP responses came back on the connection.
-
-    Counting occurrences of the status line across the whole buffer is wrong in two ways
-    that both manufacture a SMUGGLE verdict for a server that framed one request, which is
-    the worst error this harness can make:
-
-      - a response BODY may contain the literal "HTTP/1.1 " (a log viewer, an error page
-        quoting the request). Body bytes must be skipped, not scanned.
-      - a 1xx interim response is legal and is not a framed request. "100 Continue" then
-        "200 OK" is one request, not two.
-
-    So walk the stream properly: status line, headers, skip the body by its declared
-    framing, repeat. Stop at the first thing that does not parse, because a truncated tail
-    is not evidence of another request."""
-    count = 0
-    while True:
-        if not data.startswith((b"HTTP/1.1 ", b"HTTP/1.0 ")):
-            return count
-        head, sep, rest = data.partition(b"\r\n\r\n")
-        if not sep:
-            return count
-        status = head.split(b"\r\n", 1)[0].split(b" ")
-        code = status[1] if len(status) > 1 else b""
-        headers = {}
-        for line in head.split(b"\r\n")[1:]:
-            name, _, value = line.partition(b":")
-            headers[name.strip().lower()] = value.strip()
-        # 1xx carries no body and is not a framed request of its own
-        if code.startswith(b"1"):
-            data = rest
-            continue
-        count += 1
-        if headers.get(b"transfer-encoding", b"").lower().endswith(b"chunked"):
-            rest = _skip_chunked(rest)
-            if rest is None:
-                return count
-        elif b"content-length" in headers:
-            try:
-                n = int(headers[b"content-length"])
-            except ValueError:
-                return count
-            if n > len(rest):
-                return count
-            rest = rest[n:]
-        else:
-            # No declared framing. RFC 9112 6.3 says such a body runs to end of connection,
-            # but servers routinely answer an error with a bare status line and no body, and
-            # a second one of those is exactly the signal being measured. So peek: only
-            # treat the remainder as another response when it actually parses as one. A body
-            # that merely happens to mention a status line does not, because it will not
-            # also carry a complete header block at the boundary.
-            if not (
-                rest.startswith((b"HTTP/1.1 ", b"HTTP/1.0 ")) and b"\r\n\r\n" in rest
-            ):
-                return count
-        data = rest
-
-
-def _skip_chunked(data: bytes):
-    """Advance past a chunked body. None when it is truncated or malformed."""
-    while True:
-        line, sep, rest = data.partition(b"\r\n")
-        if not sep:
-            return None
-        try:
-            size = int(line.split(b";")[0].strip(), 16)
-        except ValueError:
-            return None
-        if size == 0:
-            # trailers, then the terminating blank line
-            end = rest.find(b"\r\n")
-            return rest[end + 2 :] if end != -1 else b""
-        if len(rest) < size + 2:
-            return None
-        data = rest[size + 2 :]
 
 
 def _send(port: int, payload: bytes, settle: float = 2.5):
@@ -200,17 +126,17 @@ def classify(resp: bytes) -> str:
     CL-safe   it framed exactly one request, reading the body by Content-Length"""
     if not resp:
         return "no-response"
-    n = _responses(resp)
-    first = resp.split(b"\r\n", 1)[0]
-    bad = b" 4" in first[:13] or b" 5" in first[:13]
-    if n >= 2:
+    if _responses(resp) >= 2:
         return "SMUGGLE"
-    if bad:
-        code = (
-            first.split(b" ")[1].decode(errors="replace")
-            if len(first.split(b" ")) > 1
-            else "?"
-        )
+    code = _status_code(resp)
+    if code is None:
+        # The reply is not a parseable HTTP response. That is not a refusal and it is not
+        # a clean single framing: it is a failure to measure, and naming it either would
+        # be inventing a result. The old test was `b" 4" in first[:13]`, a substring probe
+        # that reported "reject 4\xff\xfe" and even "reject " for junk, publishing a
+        # rejection code the server never sent.
+        return "unknown"
+    if 400 <= code < 600:
         return f"reject {code}"
     return "CL-safe"
 

@@ -1,0 +1,128 @@
+[
+  {
+    "name": "HAProxy 3.2",
+    "id": "haproxy",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "no-forward",
+      "identity, chunked": "rejected 422",
+      "dup TE": "no-forward",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
+    },
+    "reachable": true
+  },
+  {
+    "name": "nginx 1.31",
+    "id": "nginx",
+    "results": {
+      "chunked": "rejected 400",
+      "chunked<TAB>": "rejected 501",
+      "chunked<SP>": "rejected 400",
+      "chunked<VT>": "rejected 501",
+      "CHUNKED": "rejected 400",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Caddy 2",
+    "id": "caddy",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 501",
+      "TE obs-fold": "rejected 501",
+      "xchunked": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Traefik 3.7",
+    "id": "traefik",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "normalized",
+      "chunked<SP>": "normalized",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
+      "chunked;a=b": "rejected 501",
+      "chunked, identity": "rejected 501",
+      "identity, chunked": "rejected 501",
+      "dup TE": "rejected 501",
+      "TE obs-fold": "rejected 501",
+      "xchunked": "rejected 501"
+    },
+    "reachable": true
+  },
+  {
+    "name": "sozu 2.1.0 (control, known-vulnerable)",
+    "id": "sozu-control",
+    "results": {
+      "chunked": "normalized",
+      "chunked<TAB>": "FORWARDS-BOTH",
+      "chunked<SP>": "FORWARDS-BOTH",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "normalized",
+      "chunked;a=b": "FORWARDS-BOTH",
+      "chunked, identity": "FORWARDS-BOTH",
+      "identity, chunked": "normalized",
+      "dup TE": "normalized",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "normalized"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Apache httpd 2.4",
+    "id": "httpd",
+    "results": {
+      "chunked": "stripped",
+      "chunked<TAB>": "stripped",
+      "chunked<SP>": "stripped",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "stripped",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "rejected 400",
+      "identity, chunked": "rejected 500",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
+    },
+    "reachable": true
+  },
+  {
+    "name": "Envoy 1.39",
+    "id": "envoy",
+    "results": {
+      "chunked": "rejected 400",
+      "chunked<TAB>": "rejected 400",
+      "chunked<SP>": "rejected 400",
+      "chunked<VT>": "rejected 400",
+      "CHUNKED": "rejected 400",
+      "chunked;a=b": "rejected 400",
+      "chunked, identity": "rejected 400",
+      "identity, chunked": "rejected 400",
+      "dup TE": "rejected 400",
+      "TE obs-fold": "rejected 400",
+      "xchunked": "rejected 400"
+    },
+    "reachable": true
+  }
+]
