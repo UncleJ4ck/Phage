@@ -5,6 +5,7 @@
 functions get hard assertions on real byte strings. Everything here is pure: no Docker,
 no network, so it runs in CI alongside the rest of the suite."""
 
+import socket
 import sys
 import unittest
 from pathlib import Path
@@ -775,6 +776,51 @@ class TestDriftUntrustedIsNotBroken(unittest.TestCase):
             self._row("CL-safe", True), self._row("SMUGGLE", True)
         )
         self.assertEqual([m["direction"] for m in moves], ["REGRESSION"])
+
+
+class TestOriginPublishesBeforeClose(unittest.TestCase):
+    """The recording origin has to publish what it received while the connection is
+    still open. A front that keeps its upstream alive never closes inside the probe's
+    window, and a capture appended at close time reads back empty, which the classifier
+    reports as `no-forward`: the verdict for a proxy that forwarded nothing."""
+
+    def test_a_kept_alive_connection_is_captured_without_closing_it(self):
+        import threading
+        import time
+
+        stop = threading.Event()
+        t = threading.Thread(target=run_fronts.origin, args=(stop,), daemon=True)
+        t.start()
+        time.sleep(0.3)
+        try:
+            with run_fronts._lock:
+                run_fronts.CAPTURED.clear()
+            s = socket.create_connection(
+                ("127.0.0.1", run_fronts.UPSTREAM_PORT), timeout=3
+            )
+            try:
+                s.sendall(
+                    b"POST /carrier HTTP/1.1\r\nHost: lab\r\n"
+                    b"Content-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\nhi"
+                )
+                s.settimeout(2)
+                s.recv(4096)  # the origin answers, and the connection stays open
+                # Read inside the origin's idle window. Sleeping past it lets the
+                # connection time out and close, which makes a capture-at-close
+                # implementation pass and defeats the point of the test: the probe
+                # reads at 0.3s and the idle timeout is 0.4s.
+                time.sleep(0.1)
+                with run_fronts._lock:
+                    captured = (
+                        bytes(run_fronts.CAPTURED[0]) if run_fronts.CAPTURED else b""
+                    )
+                self.assertIn(b"POST /carrier", captured)
+                self.assertIn(b"Transfer-Encoding: chunked", captured)
+            finally:
+                s.close()
+        finally:
+            stop.set()
+            time.sleep(0.6)
 
 
 if __name__ == "__main__":

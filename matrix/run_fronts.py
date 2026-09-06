@@ -80,7 +80,8 @@ def _serve(conn):
     """
     conn.settimeout(3)
     idle = 0.4
-    buf = b""
+    buf = bytearray()
+    published = False
     answered = 0
     try:
         while True:
@@ -90,7 +91,17 @@ def _serve(conn):
                 break
             if not d:
                 break
-            buf += d
+            with _lock:
+                buf += d
+                if not published:
+                    # Publish the buffer as soon as the first byte lands and keep
+                    # extending it in place. Appending at close instead looks correct and
+                    # is not: a front that keeps its upstream connection alive never
+                    # reaches the close inside the probe's window, so the capture is
+                    # empty and the row reads `no-forward`, which is the verdict for a
+                    # proxy that forwarded nothing at all.
+                    CAPTURED.append(buf)
+                    published = True
             conn.settimeout(idle)  # the head is here; drain the rest on a short gap
             # Answer once per request head seen, so a front waiting on a response is not
             # deadlocked, but keep every byte for the verdict.
@@ -102,9 +113,6 @@ def _serve(conn):
                 )
                 answered += 1
     finally:
-        if buf:
-            with _lock:
-                CAPTURED.append(bytes(buf))
         conn.close()
 
 
@@ -184,7 +192,7 @@ def probe(port, hdr, sent_body=None, content_length=None):
         return b"", b"", f"{type(exc).__name__}: {exc}"
     time.sleep(0.3)
     with _lock:
-        return (CAPTURED[0] if CAPTURED else b""), out, None
+        return (bytes(CAPTURED[0]) if CAPTURED else b""), out, None
 
 
 def start(spec):
