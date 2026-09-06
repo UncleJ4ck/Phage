@@ -225,7 +225,21 @@ def main() -> int:
         and not c["error"]
     )
     result["confirmed"] = confirmed and clean
-    Path(args.json).write_text(json.dumps(result, indent=2) + "\n")
+    # Append rather than overwrite: firing four pairs one at a time used to leave only
+    # the last one on disk, so the file said one pair while the write-up said four.
+    out = Path(args.json)
+    prior = []
+    if out.exists():
+        try:
+            prior = json.loads(out.read_text())
+            prior = [
+                p
+                for p in prior
+                if (p["front"], p["back"]) != (result["front"], result["back"])
+            ]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            prior = []
+    out.write_text(json.dumps(prior + [result], indent=2) + "\n")
 
     if not confirmed:
         print("NOT CONFIRMED: the backend did not frame a second request")

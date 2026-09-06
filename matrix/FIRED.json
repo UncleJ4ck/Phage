@@ -1,19 +1,78 @@
-{
-  "front": "sozu 2.1.0 (control, known-vulnerable)",
-  "back": "Go net/http",
-  "variant": "chunked<TAB>",
-  "attack": {
-    "forwarded_bytes": 342,
-    "front_forwarded_variant": true,
-    "backend_responses": 2,
-    "error": null
+[
+  {
+    "front": "sozu 2.1.0 (control, known-vulnerable)",
+    "back": "Go net/http",
+    "variant": "chunked<TAB>",
+    "attack": {
+      "forwarded_bytes": 342,
+      "front_forwarded_variant": true,
+      "backend_responses": 2,
+      "error": null
+    },
+    "control": {
+      "forwarded_bytes": 333,
+      "reached_backend": true,
+      "carried_framing_header": false,
+      "backend_responses": 1,
+      "error": null
+    },
+    "confirmed": true
   },
-  "control": {
-    "forwarded_bytes": 333,
-    "reached_backend": true,
-    "carried_framing_header": false,
-    "backend_responses": 1,
-    "error": null
+  {
+    "front": "sozu 2.1.0 (control, known-vulnerable)",
+    "back": "Hypercorn",
+    "variant": "chunked<TAB>",
+    "attack": {
+      "forwarded_bytes": 342,
+      "front_forwarded_variant": true,
+      "backend_responses": 2,
+      "error": null
+    },
+    "control": {
+      "forwarded_bytes": 333,
+      "reached_backend": true,
+      "carried_framing_header": false,
+      "backend_responses": 1,
+      "error": null
+    },
+    "confirmed": true
   },
-  "confirmed": true
-}
+  {
+    "front": "sozu 2.1.0 (control, known-vulnerable)",
+    "back": "Puma",
+    "variant": "chunked<TAB>",
+    "attack": {
+      "forwarded_bytes": 342,
+      "front_forwarded_variant": true,
+      "backend_responses": 2,
+      "error": null
+    },
+    "control": {
+      "forwarded_bytes": 333,
+      "reached_backend": true,
+      "carried_framing_header": false,
+      "backend_responses": 1,
+      "error": null
+    },
+    "confirmed": true
+  },
+  {
+    "front": "sozu 2.1.0 (control, known-vulnerable)",
+    "back": "uvicorn --http h11",
+    "variant": "chunked<TAB>",
+    "attack": {
+      "forwarded_bytes": 342,
+      "front_forwarded_variant": true,
+      "backend_responses": 2,
+      "error": null
+    },
+    "control": {
+      "forwarded_bytes": 333,
+      "reached_backend": true,
+      "carried_framing_header": false,
+      "backend_responses": 1,
+      "error": null
+    },
+    "confirmed": true
+  }
+]
