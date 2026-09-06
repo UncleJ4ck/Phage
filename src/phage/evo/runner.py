@@ -12,7 +12,13 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .archive import Archive
 from .coevolution import Defender
 from .evolve import evolve, shaped_fitness
-from .genome import OPERATORS, Genome, descriptor, seed_post
+from .genome import (
+    OPERATORS,
+    Genome,
+    descriptor,
+    seed_post,
+    seed_standalone_fin,
+)
 from .minimize import ddmin
 from .oracle import Observation, Verdict, classify
 from .stigmergy import StigmergyMutator
@@ -402,6 +408,21 @@ def main() -> int:
     ap.add_argument("--out", default="poc.json")
     ap.add_argument("--replay", metavar="POC_JSON", help="re-fire a saved PoC and exit")
     ap.add_argument(
+        "--stabilize",
+        type=int,
+        default=0,
+        metavar="N",
+        help="demote any finding that does not reproduce on N re-fires (filters flaky "
+        "single-shot noise)",
+    )
+    ap.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="preflight the oracle before searching: it must FIRE on the standalone-FIN "
+        "known-positive and stay clean on a well-formed request, else abort. A negative "
+        "from an instrument that has not produced a positive is not evidence of absence",
+    )
+    ap.add_argument(
         "--raw",
         action="store_true",
         help="emit hand-built DATA frames so content-length lies reach the wire",
@@ -459,6 +480,8 @@ def main() -> int:
         neutral_drift=args.neutral_drift,
         extinction_limit=args.extinction_limit,
         coevolve=args.coevolve,
+        stabilize=args.stabilize,
+        calibration=(seed_standalone_fin(), seed_post()) if args.calibrate else None,
     )
     print(f"archive cells={len(archive)} findings={len(hits)}")
     if minimized:

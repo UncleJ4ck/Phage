@@ -1,35 +1,36 @@
-# Framework audit gates (2026-09-05)
+# Audit remediation gates (2026-09-06)
 
-Written BEFORE the work. A gate is met only with evidence a command produced.
+Written BEFORE the work. Every gate carries the evidence a command produced. Where a
+mutation test was possible the guard was shown to FAIL when its target is broken, because
+a check that cannot fail is not a check.
 
-- [x] **G1 perf**: `--jobs` measured against serial on the same population.
-      EVIDENCE: backends 91s at `--jobs 4`. Verdicts byte-identical to the serial run,
-      checked field by field, so the speedup is not bought with a different answer.
-- [x] **G2 fuzz**: classifiers and the varint encoder fuzzed with hostile input.
-      EVIDENCE: three real defects found and fixed, each with a regression test.
-      (1) `_responses` substring-counted status lines, so a body quoting "HTTP/1.1 " or a
-      legal `100 Continue` scored a benign backend as SMUGGLE. Now a real response-stream
-      walker. (2) the QUIC varint silently truncated values >= 2**62 (2**62 went on the
-      wire as 0). Now raises. (3) `drift.compare` reported "no verdict changed" for a run
-      where 10 of 11 backends failed to start. Now reports BROKEN and exits 2.
-- [x] **G3 harness security**: reviewed; the container-name defect below was the real find.
-      EVIDENCE: `docker run` used the shared `CONTAINER` constant while cleanup used the
-      per-spec name, so every spec after the first collided and leaked a container. Found
-      by live run, not by reading. Fixed and verified at the call site with an AST check.
-- [x] **G4 coverage**: quantified.
-      EVIDENCE: 11 variants, all Transfer-Encoding. 17 framing genes in genome.py unused by
-      the matrix. `driver_h2.py` exists, so the H2-to-H1 downgrade half is reachable and
-      unmeasured. Detail in the audit report.
-- [x] **G5 live re-test**: whole thing re-run against live containers after every change.
-      EVIDENCE: 11/11 backends and 7/7 fronts complete with 11 verdicts each. sozu 2.1.0
-      calibration row still returns 4 FORWARDS-BOTH. Drift clean against the pre-fix
-      baseline on both halves, so none of these fixes moved a published verdict.
-- [x] **G6 no regression shipped**: `ruff check`, `ruff format --check`, 252 tests green
-      (was 240), and the remote SHA compared to local HEAD after the push.
-
-## The one that matters most
-
-Two of the three fuzz defects would have produced a WRONG PUBLISHED CLAIM rather than a
-crash: a benign backend scored SMUGGLE, and a broken run reported clean. Both were found by
-attacking the instrument rather than the targets, which is the discipline this project is
-about, applied to itself.
+- [x] **A1 front config tmpdir**: fixed `/tmp/phage_front_cfg` replaced by a per-run
+      `mkdtemp` at mode 0700, removed in the same `finally` as the container.
+      EVIDENCE: mutation. Restoring the old fixed path fails both new tests, and the
+      symlink-squat test shows the planted canary being OVERWRITTEN
+      (`'cfg-for-9490' != 'UNTOUCHED'`), which is the attack actually landing.
+- [x] **A2 pairs.py covered**: five tests for the join that writes every PAIRS.md row.
+      EVIDENCE: mutation. `predict -> return []` gives 1 failure; broadening the predicate
+      so a hit need not share a variant gives 3.
+- [x] **A3 trust gate and rendering covered**: the trust decision extracted as `trusted()`
+      and tested, plus `to_markdown`.
+      EVIDENCE: mutation. `trusted() -> True` gives 1 failure; deleting the `(UNTRUSTED)`
+      marker gives 1.
+- [x] **A4 H3 mutators covered**: the four operators now assert the bytes they exist to
+      inject (a conflicting Host, whitespace in :path, CR/LF, a duplicate pseudo-header).
+      EVIDENCE: mutation. Neutering each to `return list(g)` fails the test; all four.
+- [x] **A5 CI path filter**: `matrix/**` added to the workflow trigger, which already
+      linted that directory at line 24 without ever running on a change to it.
+      EVIDENCE: `grep matrix .github/workflows/evo-tests.yml` shows the path and the lint.
+- [x] **A6 wiring gap**: `--stabilize N` and `--calibrate` added, and `main()` now passes
+      both to `search()`. The audit's claim needed one correction: `search()` already
+      called `stabilized()` and `calibrate()` at runner.py:131/135, so the gap was only
+      that `main()` never passed them. `seed_standalone_fin()` moved into the package as
+      the canonical known-positive; the labs each had their own copy.
+      EVIDENCE: mutation. Dropping either pass-through fails the structural guard. A
+      separate functional test proves calibration raises for an oracle that answers
+      "clean" to everything and for one that cries wolf on the benign baseline.
+- [x] **A7 no regression shipped**: 266 tests green (was 253), ruff check and
+      format --check clean, and a full live re-run after every change: 11/11 backends,
+      7/7 fronts, all 11 verdicts each, the sozu calibration row still returning four
+      FORWARDS-BOTH, and drift clean on both halves. No published verdict moved.

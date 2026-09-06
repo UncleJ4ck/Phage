@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "src/phage/evo/**"
+      - "matrix/**"
       - "tests/**"
       - ".github/workflows/evo-tests.yml"
   pull_request:

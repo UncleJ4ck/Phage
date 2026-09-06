@@ -185,6 +185,15 @@ def control(port: int):
     return _send(port, req)
 
 
+def trusted(ctl: bytes) -> bool:
+    """Whether this backend's verdicts may be published at all.
+
+    The control is two explicitly pipelined requests. A server that cannot answer them
+    twice cannot make the counter reach two for any input, so its silence on the real
+    variants says nothing about the server and everything about the instrument."""
+    return bool(ctl) and _responses(ctl) >= 2
+
+
 def classify(resp: bytes) -> str:
     """SMUGGLE  the backend framed the hidden request as a second request
     reject    it refused the message outright
@@ -263,7 +272,7 @@ def run(spec) -> dict:
         try:
             ctl, err = control(spec["port"])
             row["control_responses"] = _responses(ctl) if ctl else 0
-            row["trusted"] = bool(ctl) and _responses(ctl) >= 2
+            row["trusted"] = trusted(ctl)
             if not row["trusted"]:
                 out.append(
                     f"    CONTROL FAILED (responses={row['control_responses']}), "

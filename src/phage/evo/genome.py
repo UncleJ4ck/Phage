@@ -133,6 +133,27 @@ def seed_post(
     ]
 
 
+def seed_standalone_fin(cl: int = 10, path: bytes = b"/evil") -> Genome:
+    """The known-positive: HEADERS declaring a Content-Length, then a bare QUIC FIN with
+    no body. This is CVE-2026-33555 in one genome, and it is what an oracle must be able
+    to SEE before any clean result from it means anything. Pair it with seed_post() as the
+    negative for gates.calibrate. The labs each rebuilt this shape by hand; it belongs in
+    the package so the CLI and the labs preflight against the same thing."""
+    return [
+        Headers(
+            (
+                (b":method", b"POST"),
+                (b":scheme", b"https"),
+                (b":authority", b"lab"),
+                (b":path", path),
+                (b"content-length", str(cl).encode()),
+            ),
+            end_stream=False,
+        ),
+        Fin(),
+    ]
+
+
 # --- Structural read-outs used for behavior descriptors and oracles. ---
 
 

@@ -25,8 +25,10 @@ Usage:
 
 import argparse
 import json
+import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -143,9 +145,14 @@ def probe(port, hdr):
 
 
 def start(spec):
+    """Start the front. Returns (ok, cfgdir); the caller removes cfgdir.
+
+    The config used to go to a fixed /tmp/phage_front_cfg with mkdir(exist_ok=True), so
+    another local uid could pre-create the directory or plant a symlink at the file and
+    both own the write and own what gets bind-mounted into every front container.
+    mkdtemp gives an unpredictable name at mode 0700, which closes both."""
     docker("rm", "-f", CONTAINER)
-    cfgdir = Path("/tmp/phage_front_cfg")
-    cfgdir.mkdir(exist_ok=True)
+    cfgdir = Path(tempfile.mkdtemp(prefix="phage_front_"))
     cfg = cfgdir / "cfg"
     cfg.write_text(spec["config"].format(up=UPSTREAM_PORT))
     r = docker(
@@ -162,17 +169,17 @@ def start(spec):
     )
     if r.returncode != 0:
         print(f"    docker run failed: {r.stderr.strip()[:200]}")
-        return False
+        return False, cfgdir
     for _ in range(int(spec.get("boot", 90))):
         try:
             socket.create_connection(("127.0.0.1", spec["port"]), timeout=1).close()
             time.sleep(1.0)
-            return True
+            return True, cfgdir
         except OSError:
             time.sleep(1.0)
     print("    timed out waiting for the port")
     print("    " + docker("logs", "--tail", "4", CONTAINER).stderr.strip()[:300])
-    return False
+    return False, cfgdir
 
 
 def run(spec):
@@ -183,7 +190,9 @@ def run(spec):
         "reachable": False,
     }
     print(f"  {spec['name']}")
-    if not start(spec):
+    ok, cfgdir = start(spec)
+    if not ok:
+        shutil.rmtree(cfgdir, ignore_errors=True)
         row["error"] = "failed to start"
         return row
     try:
@@ -200,6 +209,7 @@ def run(spec):
             print(f"    {label:20} {verdict}")
     finally:
         docker("rm", "-f", CONTAINER)
+        shutil.rmtree(cfgdir, ignore_errors=True)
     return row
 
 

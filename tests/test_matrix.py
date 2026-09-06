@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "matrix"))
 
 import drift  # noqa: E402
+import pairs  # noqa: E402
 import run_fronts  # noqa: E402
 import run_matrix  # noqa: E402
 
@@ -319,6 +320,168 @@ class TestResponseCounting(unittest.TestCase):
         ):
             run_matrix.classify(junk)
             run_matrix._responses(junk)
+
+
+class TestFrontConfigIsolation(unittest.TestCase):
+    """The front config is bind-mounted into every front container, so whoever owns that
+    file owns what the proxy under test is configured with. It used to live at a fixed
+    /tmp/phage_front_cfg created with mkdir(exist_ok=True), which another local uid could
+    pre-create or symlink."""
+
+    def _start(self, spec):
+        import unittest.mock as mock
+
+        # docker is not available in CI and is irrelevant here: fail the run immediately
+        # so start() returns right after writing the config.
+        fake = mock.Mock(returncode=1, stderr="no docker", stdout="")
+        with mock.patch.object(run_fronts, "docker", return_value=fake):
+            return run_fronts.start(spec)
+
+    SPEC = {
+        "name": "t",
+        "image": "x",
+        "port": 1,
+        "config_path": "/c",
+        "config": "cfg-for-{up}",
+        "boot": 1,
+    }
+
+    def test_the_legacy_predictable_path_is_never_written(self):
+        import os
+        import shutil
+        import tempfile
+
+        legacy = Path(tempfile.gettempdir()) / "phage_front_cfg"
+        canary = Path(tempfile.mkdtemp(prefix="phage_canary_"))
+        (canary / "cfg").write_text("UNTOUCHED")
+        existed = legacy.exists() or legacy.is_symlink()
+        if not existed:
+            os.symlink(
+                canary, legacy
+            )  # the squat: legacy path points at attacker ground
+        try:
+            ok, cfgdir = self._start(dict(self.SPEC))
+            self.assertFalse(ok)
+            self.assertEqual((canary / "cfg").read_text(), "UNTOUCHED")
+            self.assertNotIn("phage_front_cfg", str(cfgdir))
+            shutil.rmtree(cfgdir, ignore_errors=True)
+        finally:
+            if not existed and legacy.is_symlink():
+                legacy.unlink()
+            shutil.rmtree(canary, ignore_errors=True)
+
+    def test_each_run_gets_its_own_private_directory(self):
+        import shutil
+        import stat
+
+        _, a = self._start(dict(self.SPEC))
+        _, b = self._start(dict(self.SPEC))
+        try:
+            self.assertNotEqual(a, b, "a predictable name is the whole vulnerability")
+            self.assertEqual((a / "cfg").read_text(), "cfg-for-9490")
+            mode = stat.S_IMODE(a.stat().st_mode)
+            self.assertEqual(mode, 0o700, f"config dir is {oct(mode)}, must be private")
+        finally:
+            shutil.rmtree(a, ignore_errors=True)
+            shutil.rmtree(b, ignore_errors=True)
+
+
+class TestPairs(unittest.TestCase):
+    """predict() is the join that produces every row of PAIRS.md, and nothing imported this
+    module before. A desync is predicted only when the front forwards a value the back
+    honors, so the three near-misses matter as much as the hit."""
+
+    def _f(self, name, results, **kw):
+        row = {"name": name, "results": results, "reachable": True}
+        row.update(kw)
+        return row
+
+    def _b(self, name, results, **kw):
+        row = {"name": name, "parser": "p", "results": results, "trusted": True}
+        row.update(kw)
+        return row
+
+    def test_forwarded_and_honored_is_a_predicted_pair(self):
+        got = pairs.predict(
+            [self._f("F", {"v": "FORWARDS-BOTH"})], [self._b("B", {"v": "SMUGGLE"})]
+        )
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["variants"], ["v"])
+
+    def test_a_front_that_acted_on_the_value_is_not_a_pair(self):
+        # normalized means front and back agree, which is the opposite of a desync
+        self.assertEqual(
+            pairs.predict(
+                [self._f("F", {"v": "normalized"})], [self._b("B", {"v": "SMUGGLE"})]
+            ),
+            [],
+        )
+
+    def test_a_back_that_refuses_the_value_is_not_a_pair(self):
+        self.assertEqual(
+            pairs.predict(
+                [self._f("F", {"v": "FORWARDS-BOTH"})], [self._b("B", {"v": "CL-safe"})]
+            ),
+            [],
+        )
+
+    def test_an_unreachable_front_is_excluded(self):
+        # its verdicts describe the harness, not the proxy
+        self.assertEqual(
+            pairs.predict(
+                [self._f("F", {"v": "FORWARDS-BOTH"}, reachable=False)],
+                [self._b("B", {"v": "SMUGGLE"})],
+            ),
+            [],
+        )
+
+    def test_the_two_halves_must_agree_on_the_SAME_variant(self):
+        # the bug a looser predicate would introduce: a hit on any variant, not a shared one
+        self.assertEqual(
+            pairs.predict(
+                [self._f("F", {"a": "FORWARDS-BOTH", "b": "normalized"})],
+                [self._b("B", {"a": "CL-safe", "b": "SMUGGLE"})],
+            ),
+            [],
+        )
+
+
+class TestTrustGateAndRendering(unittest.TestCase):
+    def test_the_control_must_answer_twice_before_verdicts_are_published(self):
+        two = OK + OK
+        self.assertTrue(run_matrix.trusted(two))
+        self.assertFalse(
+            run_matrix.trusted(OK), "one response cannot prove the counter"
+        )
+        self.assertFalse(run_matrix.trusted(b""), "silence is not trust")
+        self.assertFalse(run_matrix.trusted(None))
+
+    def test_an_untrusted_row_is_marked_in_the_rendered_table(self):
+        rows = [
+            {
+                "name": "Good",
+                "parser": "g",
+                "trusted": True,
+                "results": {"v": "SMUGGLE"},
+            },
+            {
+                "name": "Blind",
+                "parser": "b",
+                "trusted": False,
+                "results": {"v": "CL-safe"},
+            },
+        ]
+        md = run_matrix.to_markdown(rows)
+        self.assertIn("Blind (UNTRUSTED)", md)
+        self.assertNotIn("Good (UNTRUSTED)", md)
+        self.assertIn("SMUGGLE", md)
+
+    def test_the_summary_counts_the_backends_that_honor_something(self):
+        rows = [
+            {"name": "A", "parser": "a", "trusted": True, "results": {"v": "SMUGGLE"}},
+            {"name": "B", "parser": "b", "trusted": True, "results": {"v": "CL-safe"}},
+        ]
+        self.assertIn("at least one variant: 1", run_matrix.to_markdown(rows))
 
 
 if __name__ == "__main__":

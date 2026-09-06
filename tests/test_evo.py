@@ -1036,6 +1036,97 @@ class TestCveClassGenes(unittest.TestCase):
                 "ResetStreamAt op there would fail silently",
             )
 
+    def test_the_cli_can_reach_calibration_and_stabilization(self):
+        """search() supported both from the start; main() never passed them, so the
+        anti-false-positive machinery was unreachable from `python -m phage.evo`. The
+        defect was wiring, so the guard is structural."""
+        import ast
+        from pathlib import Path as _P
+
+        src = _P(__file__).resolve().parent.parent / "src/phage/evo/runner.py"
+        tree = ast.parse(src.read_text())
+        main = next(
+            f
+            for f in ast.walk(tree)
+            if isinstance(f, ast.FunctionDef) and f.name == "main"
+        )
+        flags = {
+            a.value
+            for n in ast.walk(main)
+            if isinstance(n, ast.Call)
+            and getattr(n.func, "attr", None) == "add_argument"
+            for a in n.args
+            if isinstance(a, ast.Constant)
+        }
+        self.assertIn("--calibrate", flags)
+        self.assertIn("--stabilize", flags)
+
+        call = next(
+            n
+            for n in ast.walk(main)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "search"
+        )
+        passed = {k.arg for k in call.keywords}
+        self.assertIn("calibration", passed, "main parses --calibrate but drops it")
+        self.assertIn("stabilize", passed, "main parses --stabilize but drops it")
+
+    def test_calibration_aborts_an_oracle_that_cannot_see_the_known_bug(self):
+        from phage.evo.gates import CalibrationError, calibrate
+        from phage.evo.genome import seed_post, seed_standalone_fin
+
+        pos, neg = seed_standalone_fin(), seed_post()
+        # an oracle that answers "clean" to everything, which is the failure being guarded
+        with self.assertRaises(CalibrationError):
+            calibrate(lambda g: Observation(1), pos, neg)
+        # and one that cries wolf on the benign baseline
+        with self.assertRaises(CalibrationError):
+            calibrate(lambda g: Observation(2), pos, neg)
+        # a working one preflights clean
+        calibrate(lambda g: Observation(2 if g is pos else 1), pos, neg)
+
+    def test_h3_mutators_actually_change_the_genome(self):
+        """Each of these four could be replaced by `return list(g)` and the old coverage,
+        which only asserted the result was a genome, would stay green. Assert the specific
+        bytes the operator exists to inject."""
+        seed = G.seed_post(body=b"AAAA")
+
+        def fields_of(gen):
+            return [f for o in gen if isinstance(o, G.Headers) for f in o.fields]
+
+        # a Host that contradicts :authority is the whole point of the operator
+        out = G._mut_authority_host_conflict(seed, random.Random(0))
+        hosts = [v for k, v in fields_of(out) if k.lower() == b"host"]
+        self.assertEqual(len(hosts), 1, "no Host header was added")
+        auth = [v for k, v in fields_of(out) if k.lower() == b":authority"]
+        self.assertNotEqual(hosts[0], auth[0], "Host must conflict with :authority")
+
+        # :path must carry whitespace or an extra token for the request-line splice
+        out = G._mut_pseudo_path_space(seed, random.Random(0))
+        path = [v for k, v in fields_of(out) if k.lower() == b":path"][0]
+        self.assertTrue(
+            any(c in path for c in (b" ", b"\t", b"//", b"#")),
+            f"path {path!r} carries nothing that would re-parse",
+        )
+
+        # the injection operator must emit CR or LF, which is what a downgrade may splice
+        out = G._mut_h3_reqline_inject(seed, random.Random(0))
+        path = [v for k, v in fields_of(out) if k.lower() == b":path"][0]
+        self.assertTrue(
+            b"\r" in path or b"\n" in path, f"path {path!r} carries no CR/LF to inject"
+        )
+
+        # duplicate pseudo-header, or a value with a bare control character
+        for seed_n in range(8):
+            out = G._mut_h3_pseudo_dup(seed, random.Random(seed_n))
+            f = fields_of(out)
+            names = [k.lower() for k, _ in f]
+            dup = any(n.startswith(b":") and names.count(n) > 1 for n in set(names))
+            ctrl = any(c in v for _, v in f for c in (b"\r", b"\n", b"\x00"))
+            self.assertTrue(
+                dup or ctrl,
+                f"seed {seed_n} produced neither a duplicate nor a control char",
+            )
+
     def test_varint_matches_rfc9000_at_every_length_boundary(self):
         # an independent reading of RFC 9000 section 16, not a copy of the implementation
         from phage.evo.quic_ext import encode_reset_stream_at
