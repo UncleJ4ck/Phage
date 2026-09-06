@@ -451,9 +451,11 @@ produced a positive is not evidence of absence.
 `--stabilize N` re-fires every flagged genome N times and demotes anything that does
 not reproduce. A signal you cannot turn on again on demand is noise, not a finding.
 
-The known-positive is the standalone FIN, and it needs an origin that keeps its
-connection open. Against `lab/` the preflight will abort, which is the gate being
-right rather than a bug: see below.
+The known-positive is the standalone FIN, which needs two things `lab/` does not
+have: an origin that keeps its connection open, so the poisoning can happen at all,
+and an oracle that reads the victim's request line rather than counting requests, so
+it can be seen. Against `lab/` the preflight aborts, which is the gate being right
+rather than a bug: see below.
 
 ## What the origin oracle can and cannot see
 
@@ -468,10 +470,12 @@ backend connection is reused. `lab_h3cve/conn_bk.py` holds its connections open 
 logs a request line per framed request, which is why the poisoning is visible there
 and not in `lab/`.
 
-The origin now records the body it actually received (`short` in the JSONL) next to
-the count, because it used to record the DECLARED `Content-Length` and call it the
-body length, which made a truncated request byte-identical in the log to a
-well-formed one. That number is deliberately not part of the verdict. Measured
+The origin now records the body it actually received rather than the one the header
+declared, and reports the `Content-Length` shortfall as `short` in the JSONL next to
+the count. It used to record the declared value and call it the body length, which
+made a truncated request byte-identical in the log to a well-formed one. `short`
+covers the `Content-Length` path only; a chunked body reports what arrived but
+claims no shortfall. That number is deliberately not part of the verdict. Measured
 2026-09-06 against HAProxy 3.0.18 and 3.0.26, three runs each: a standalone FIN under
 `Content-Length: 10` arrives at the origin as one request short by ten bytes on
 **both** builds, because HAProxy streams the head through before it decides to abort

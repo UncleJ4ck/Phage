@@ -2553,6 +2553,12 @@ class TestShortBody(unittest.TestCase):
         raw = b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nAAAA\r\n0\r\n\r\n"
         self.assertEqual(parse_requests(raw)[0].short(), 0)
 
+    def test_a_truncated_chunk_counts_the_bytes_that_arrived(self):
+        # The chunk header promises 100, four bytes are there. Trusting the header
+        # is the same lie the Content-Length path used to tell.
+        raw = b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n64\r\nAAAA"
+        self.assertEqual(parse_requests(raw)[0].body_len, 4)
+
     def test_a_pipelined_pair_is_not_short(self):
         # The second request's bytes must not be mistaken for the first one's body.
         raw = b"GET /a HTTP/1.1\r\nHost: x\r\n\r\nGET /b HTTP/1.1\r\nHost: x\r\n\r\n"

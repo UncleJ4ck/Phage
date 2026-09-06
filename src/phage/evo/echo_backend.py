@@ -53,8 +53,11 @@ def _consume_chunked(raw: bytes, i: int) -> Tuple[int, int]:
                 return i + 2, decoded
             end = raw.find(b"\r\n\r\n", i)
             return (end + 4 if end != -1 else len(raw)), decoded
+        # Count the bytes that are THERE, not the ones the chunk header claimed.
+        # Trusting the header here is the same lie the Content-Length path used to
+        # tell: a truncated chunk stream would report its declared total.
+        decoded += min(size, max(0, len(raw) - i))
         i += size + 2  # chunk data + trailing CRLF
-        decoded += size
     return i, decoded
 
 
