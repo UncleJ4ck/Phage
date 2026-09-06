@@ -189,7 +189,9 @@ def run(spec):
         "results": {},
         "reachable": False,
     }
-    print(f"  {spec['name']}")
+    # A front takes minutes to boot and probe, and stdout redirected to a file is
+    # block-buffered, so an unflushed run looks hung for its whole duration.
+    print(f"  {spec['name']}", flush=True)
     ok, cfgdir = start(spec)
     if not ok:
         shutil.rmtree(cfgdir, ignore_errors=True)
@@ -206,7 +208,7 @@ def run(spec):
             h, resp, err = probe(spec["port"], hdr)
             verdict = classify(h, resp) if not err else f"error: {err}"
             row["results"][label] = verdict
-            print(f"    {label:20} {verdict}")
+            print(f"    {label:20} {verdict}", flush=True)
     finally:
         docker("rm", "-f", CONTAINER)
         shutil.rmtree(cfgdir, ignore_errors=True)
