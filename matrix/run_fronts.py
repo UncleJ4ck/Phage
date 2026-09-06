@@ -202,7 +202,7 @@ def run(spec):
         row["reachable"] = bool(ctl)
         if not row["reachable"]:
             print("    CONTROL FAILED: nothing reached the origin, verdicts untrusted")
-        for label, hdr in VARIANTS:
+        for label, hdr, _body in VARIANTS:
             h, resp, err = probe(spec["port"], hdr)
             verdict = classify(h, resp) if not err else f"error: {err}"
             row["results"][label] = verdict

@@ -1,0 +1,8 @@
+{
+  "target": "sozu-control",
+  "front": "sozu 2.1.0 (control, known-vulnerable)",
+  "calibrated": true,
+  "hits": 0,
+  "verdict": "clean",
+  "smallest_ops": 0
+}

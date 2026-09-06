@@ -13,14 +13,7 @@
       "identity, chunked": "reject 501",
       "dup TE": "reject 501",
       "TE obs-fold": "reject 501",
-      "xchunked": "reject 501",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "SMUGGLE",
-      "chunk-ext terminator": "SMUGGLE",
-      "LF-only terminator": "CL-safe",
-      "0x-prefixed size": "CL-safe"
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -39,14 +32,7 @@
       "identity, chunked": "reject 400",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 400",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "reject 400",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -65,14 +51,7 @@
       "identity, chunked": "reject 400",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 400",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "SMUGGLE",
-      "chunk-ext terminator": "SMUGGLE",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -91,14 +70,7 @@
       "identity, chunked": "reject 400",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 400",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "reject 400",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -117,14 +89,7 @@
       "identity, chunked": "reject 501",
       "dup TE": "reject 501",
       "TE obs-fold": "reject 501",
-      "xchunked": "reject 501",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "SMUGGLE",
-      "chunk-ext terminator": "SMUGGLE",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -143,14 +108,7 @@
       "identity, chunked": "reject 400",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 501",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "reject 400",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 501"
     },
     "trusted": false,
     "control_responses": 1
@@ -169,14 +127,7 @@
       "identity, chunked": "CL-safe",
       "dup TE": "CL-safe",
       "TE obs-fold": "no-response",
-      "xchunked": "no-response",
-      "TE ws-before-colon": "no-response",
-      "CL ws-before-colon": "no-response",
-      "dup CL": "no-response",
-      "bare-LF TE": "CL-safe",
-      "chunk-ext terminator": "CL-safe",
-      "LF-only terminator": "CL-safe",
-      "0x-prefixed size": "CL-safe"
+      "xchunked": "no-response"
     },
     "trusted": false,
     "control_responses": 0
@@ -195,14 +146,7 @@
       "identity, chunked": "reject 501",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 501",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "SMUGGLE",
-      "LF-only terminator": "no-response",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 501"
     },
     "trusted": true,
     "control_responses": 2
@@ -221,14 +165,7 @@
       "identity, chunked": "CL-safe",
       "dup TE": "CL-safe",
       "TE obs-fold": "CL-safe",
-      "xchunked": "CL-safe",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "CL-safe",
-      "LF-only terminator": "CL-safe",
-      "0x-prefixed size": "CL-safe"
+      "xchunked": "CL-safe"
     },
     "trusted": true,
     "control_responses": 2
@@ -247,14 +184,7 @@
       "identity, chunked": "reject 400",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 400",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "reject 400",
-      "chunk-ext terminator": "reject 400",
-      "LF-only terminator": "reject 400",
-      "0x-prefixed size": "reject 400"
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2
@@ -273,14 +203,7 @@
       "identity, chunked": "CL-safe",
       "dup TE": "reject 400",
       "TE obs-fold": "reject 400",
-      "xchunked": "reject 400",
-      "TE ws-before-colon": "reject 400",
-      "CL ws-before-colon": "reject 400",
-      "dup CL": "reject 400",
-      "bare-LF TE": "CL-safe",
-      "chunk-ext terminator": "CL-safe",
-      "LF-only terminator": "CL-safe",
-      "0x-prefixed size": "CL-safe"
+      "xchunked": "reject 400"
     },
     "trusted": true,
     "control_responses": 2

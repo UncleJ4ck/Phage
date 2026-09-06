@@ -35,6 +35,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -43,27 +44,61 @@ from backends import BACKENDS  # noqa: E402
 # one parser, shared with the package oracles; two copies means two answers
 from phage.evo.http1 import _responses, _status_code  # noqa: E402
 
-# The framing header blocks under test. Each entry is the raw header line(s) inserted
-# after Content-Length, so a variant can express what a single value cannot: a duplicated
-# Transfer-Encoding, an obs-fold continuation, a second conflicting coding. The first
-# entry is well-formed and acts as the reference; a server honoring plain `chunked` is
-# behaving correctly, and the obfuscated rows decide whether a lenient front end can be
-# paired with it.
+SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
+DEFAULT_BODY = b"0\r\n\r\n" + SMUGGLED
+
+
+class Variant(NamedTuple):
+    """One framing experiment: a header block, and optionally a body shape.
+
+    `body` is the carrier's payload. Leave it None for the header experiments, where
+    the question is which spelling of a value the server acts on. Set it when the
+    disagreement is about what ENDS the body rather than what starts it, because the
+    header is identical in those and only the terminator differs."""
+
+    label: str
+    header: bytes
+    body: Optional[bytes] = None
+
+
+# The framing experiments. The first group varies the VALUE of Transfer-Encoding: a
+# server honoring plain `chunked` is behaving correctly, and the obfuscated spellings
+# decide whether a lenient front end can be paired with it.
+#
+# The second group varies the SHAPE of the header block instead. RFC 9112 forbids
+# whitespace before the colon and requires CRLF line terminators, so a parser that
+# accepts either reads a different set of headers than the proxy in front of it did.
+# That is the same disagreement one layer up from the value space.
+#
+# The third group varies the chunk TERMINATOR. The header says `chunked` in all of
+# them; what moves is where the body ends.
 VARIANTS = [
-    ("chunked", b"Transfer-Encoding: chunked"),
-    ("chunked<TAB>", b"Transfer-Encoding: chunked\t"),
-    ("chunked<SP>", b"Transfer-Encoding: chunked "),
-    ("chunked<VT>", b"Transfer-Encoding: chunked\x0b"),
-    ("CHUNKED", b"Transfer-Encoding: CHUNKED"),
-    ("chunked;a=b", b"Transfer-Encoding: chunked;a=b"),
-    ("chunked, identity", b"Transfer-Encoding: chunked, identity"),
-    ("identity, chunked", b"Transfer-Encoding: identity, chunked"),
-    ("dup TE", b"Transfer-Encoding: chunked\r\nTransfer-Encoding: identity"),
-    ("TE obs-fold", b"Transfer-Encoding: chunked\r\n\tidentity"),
-    ("xchunked", b"Transfer-Encoding: xchunked"),
+    Variant("chunked", b"Transfer-Encoding: chunked"),
+    Variant("chunked<TAB>", b"Transfer-Encoding: chunked\t"),
+    Variant("chunked<SP>", b"Transfer-Encoding: chunked "),
+    Variant("chunked<VT>", b"Transfer-Encoding: chunked\x0b"),
+    Variant("CHUNKED", b"Transfer-Encoding: CHUNKED"),
+    Variant("chunked;a=b", b"Transfer-Encoding: chunked;a=b"),
+    Variant("chunked, identity", b"Transfer-Encoding: chunked, identity"),
+    Variant("identity, chunked", b"Transfer-Encoding: identity, chunked"),
+    Variant("dup TE", b"Transfer-Encoding: chunked\r\nTransfer-Encoding: identity"),
+    Variant("TE obs-fold", b"Transfer-Encoding: chunked\r\n\tidentity"),
+    Variant("xchunked", b"Transfer-Encoding: xchunked"),
+    Variant("TE ws-before-colon", b"Transfer-Encoding : chunked"),
+    Variant("CL ws-before-colon", b"Content-Length : 4"),
+    Variant("dup CL", b"Content-Length: 4"),
+    Variant("bare-LF TE", b"X-Pad: 1\nTransfer-Encoding: chunked"),
+    Variant(
+        "chunk-ext terminator",
+        b"Transfer-Encoding: chunked",
+        b"0;a=b\r\n\r\n" + SMUGGLED,
+    ),
+    Variant("LF-only terminator", b"Transfer-Encoding: chunked", b"0\n\n" + SMUGGLED),
+    Variant(
+        "0x-prefixed size", b"Transfer-Encoding: chunked", b"0x0\r\n\r\n" + SMUGGLED
+    ),
 ]
 
-SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
 CONTAINER = "phage_matrix_target"  # suffixed per spec so specs can run side by side
 
 
@@ -88,17 +123,17 @@ def _send(port: int, payload: bytes, settle: float = 2.5):
     return out, None
 
 
-def build(hdr: bytes) -> bytes:
+def build(hdr: bytes, body: Optional[bytes] = None) -> bytes:
     """One carrier request whose body hides a second request behind a zero-length chunk."""
-    body = b"0\r\n\r\n" + SMUGGLED
+    body = DEFAULT_BODY if body is None else body
     return (
         b"POST /carrier HTTP/1.1\r\nHost: lab\r\n"
         b"Content-Length: %d\r\n%s\r\n\r\n" % (len(body), hdr)
     ) + body
 
 
-def probe(port: int, hdr: bytes):
-    return _send(port, build(hdr))
+def probe(port: int, hdr: bytes, body: Optional[bytes] = None):
+    return _send(port, build(hdr, body))
 
 
 def control(port: int):
@@ -204,11 +239,11 @@ def run(spec) -> dict:
                     f"    CONTROL FAILED (responses={row['control_responses']}), "
                     "verdicts untrusted"
                 )
-            for label, te in VARIANTS:
-                resp, err = probe(spec["port"], te)
+            for v in VARIANTS:
+                resp, err = probe(spec["port"], v.header, v.body)
                 verdict = classify(resp) if not err else f"error: {err}"
-                row["results"][label] = verdict
-                out.append(f"    {label:20} {verdict}")
+                row["results"][v.label] = verdict
+                out.append(f"    {v.label:20} {verdict}")
         finally:
             docker("rm", "-f", container_for(spec))
     finally:
@@ -217,7 +252,7 @@ def run(spec) -> dict:
 
 
 def to_markdown(rows) -> str:
-    heads = [v[0] for v in VARIANTS]
+    heads = [v.label for v in VARIANTS]
     out = [
         "# HTTP framing honor matrix",
         "",

@@ -369,7 +369,82 @@ you did not try, so `matrix/` measures the two halves separately.
 python matrix/run_matrix.py     # back half  -> matrix/MATRIX.md, matrix/results.json
 python matrix/run_fronts.py     # front half -> matrix/fronts.json
 python matrix/pairs.py          # join       -> matrix/PAIRS.md
+python matrix/fire_pair.py      # confirm    -> matrix/FIRED.json
+python matrix/run_fronts_h2.py  # h2 half    -> matrix/fronts_h2.json
 ```
+
+## Three axes, not one
+
+The variant list started as eleven spellings of `chunked`, which measures the value
+space of a single header and nothing else. It now covers three axes:
+
+- **value**: how `chunked` is spelled (`chunked<TAB>`, `CHUNKED`, `chunked;a=b`, a
+  duplicated or obs-folded `Transfer-Encoding`).
+- **header shape**: whitespace before the colon, a bare LF used as a line terminator,
+  a second conflicting `Content-Length`. The disagreement here is about where a header
+  line ends rather than what a value says.
+- **chunk terminator**: an extension on the zero-length chunk, an LF-only terminator,
+  an `0x`-prefixed size. The header says `chunked` in all three; what moves is where
+  the body ends.
+
+The second and third axes reach parsers the first cannot. `bare-LF TE` smuggles on Go
+`net/http`, `h11` and Hypercorn. `chunk-ext terminator` adds Puma, which rejects every
+`Transfer-Encoding` value variant and every other shape.
+
+## Firing a pair
+
+`PAIRS.md` is a list of hypotheses. `fire_pair.py` turns one into a measurement: it
+starts the front and the backend as real containers with a byte tap between them, sends
+the carrier, and counts the responses the backend actually emitted.
+
+```
+pair: sozu 2.1.0 (control, known-vulnerable)  ->  Go net/http   variant `chunked<TAB>`
+  attack : front forwarded 342B, backend framed 2 response(s)
+  control: front forwarded 333B, backend framed 1 response(s)
+PAIR CONFIRMED
+negative control clean
+```
+
+Every fire is bracketed by the identical carrier with the framing variant removed. If
+the second request survives that, the variant was never the cause and the pair is not
+confirmed. Confirmed 2026-09-06 for all four predicted pairs (sozu 2.1.0 against Go
+`net/http`, Hypercorn, Puma and uvicorn `h11`), which is the first end-to-end check of
+the join arithmetic rather than of either half alone.
+
+## The HTTP/2 half
+
+HTTP/2 has no chunked encoding, and RFC 9113 section 8.2.2 forbids connection-specific
+header fields on the wire. So the question on this axis is not which spelling a proxy
+honors, it is whether the proxy MINTS an HTTP/1 `Transfer-Encoding` out of a request
+that was never allowed to carry one. `run_fronts_h2.py` speaks h2c with header
+validation disabled, because a conformant HTTP/2 client refuses to put those fields on
+the wire and that refusal is exactly what an attacker does not have. Same recording
+origin and container harness as the HTTP/1 front half, so the verdicts compare directly.
+
+Measured 2026-09-06 across five h2c-capable fronts (HAProxy 3.2, nginx 1.31, Caddy 2,
+Apache httpd 2.4, Envoy 1.39): none of them mints a `Transfer-Encoding`. Every
+connection-specific field is refused outright. The row that makes that readable is the
+control: a well-formed h2 request comes out the other side as `stripped`, so the origin
+was reachable and the harness could see a forwarded request. Without it, `no-forward`
+everywhere would be indistinguishable from a broken measurement.
+
+## Where the search can run at all
+
+`evo_vs_front.py` points the evolutionary search at a front from the matrix population,
+with the counting backend behind it and calibration first. Run against all seven fronts,
+only sozu 2.1.0 calibrates. The other six normalize the known positive, so the oracle
+cannot see a bug that is definitely present and the search aborts instead of returning a
+clean sweep:
+
+```
+sozu 2.1.0 (control, known-vulnerable): calibrated=True verdict=clean hits=0
+HAProxy 3.2: calibration aborted: oracle is BLIND to a known positive
+nginx 1.31:  calibration aborted: oracle is BLIND to a known positive
+```
+
+That is a real limit and it is worth stating plainly: a backend-count oracle can only
+search a front that already forwards a framing conflict. On a front that normalizes,
+there is nothing for it to observe, and a clean result from it would have meant nothing.
 
 ## Drift
 

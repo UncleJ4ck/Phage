@@ -66,10 +66,36 @@ class TestBackendClassify(unittest.TestCase):
         declared = int(cl_line.split(b":")[1])
         self.assertEqual(declared, len(body))
 
-    def test_every_variant_is_a_wellformed_header_block(self):
-        for label, hdr in run_matrix.VARIANTS:
-            self.assertNotIn(b"\n", hdr.replace(b"\r\n", b""), f"{label} has a bare LF")
-            self.assertTrue(hdr.lower().startswith(b"transfer-encoding:"), label)
+    def test_no_variant_terminates_the_header_block_early(self):
+        # A variant carrying a blank line would end the headers and turn the rest of
+        # the carrier into a body, which is a malformed test case rather than a server
+        # behaviour. The bare-LF and whitespace-before-colon variants are deliberate
+        # shape violations and still have to stay inside the header block.
+        for label, hdr, _body in run_matrix.VARIANTS:
+            self.assertNotIn(b"\r\n\r\n", hdr, f"{label} ends the header block")
+            self.assertNotIn(b"\n\n", hdr, f"{label} ends the header block")
+            first = hdr.split(b"\r\n")[0].split(b"\n")[0]
+            self.assertRegex(first, rb"^[A-Za-z0-9-]+ ?:", label)
+
+    def test_every_variant_carrier_declares_a_covering_content_length(self):
+        # Including the terminator variants, which supply their own body.
+        for label, hdr, body in run_matrix.VARIANTS:
+            req = run_matrix.build(hdr, body)
+            head, _, sent = req.partition(b"\r\n\r\n")
+            cl = next(
+                ln
+                for ln in head.split(b"\r\n")
+                if ln.lower().startswith(b"content-length:")
+            )
+            self.assertEqual(int(cl.split(b":")[1]), len(sent), label)
+
+    def test_the_terminator_variants_actually_vary_the_body(self):
+        bodies = {v.label: v.body for v in run_matrix.VARIANTS if v.body is not None}
+        self.assertGreaterEqual(len(bodies), 3)
+        self.assertEqual(len(set(bodies.values())), len(bodies))
+        for label, body in bodies.items():
+            self.assertNotEqual(body, run_matrix.DEFAULT_BODY, label)
+            self.assertIn(run_matrix.SMUGGLED, body, label)
 
 
 class TestFrontClassify(unittest.TestCase):

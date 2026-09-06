@@ -13,14 +13,7 @@
       "identity, chunked": "rejected 422",
       "dup TE": "no-forward",
       "TE obs-fold": "rejected 400",
-      "xchunked": "rejected 400",
-      "TE ws-before-colon": "no-forward",
-      "CL ws-before-colon": "no-forward",
-      "dup CL": "no-forward",
-      "bare-LF TE": "normalized",
-      "chunk-ext terminator": "normalized",
-      "LF-only terminator": "normalized",
-      "0x-prefixed size": "normalized"
+      "xchunked": "rejected 400"
     },
     "reachable": true
   },
@@ -38,14 +31,7 @@
       "identity, chunked": "rejected 501",
       "dup TE": "rejected 400",
       "TE obs-fold": "rejected 400",
-      "xchunked": "rejected 501",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "rejected 400",
-      "chunk-ext terminator": "rejected 400",
-      "LF-only terminator": "rejected 400",
-      "0x-prefixed size": "rejected 400"
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -63,14 +49,7 @@
       "identity, chunked": "rejected 501",
       "dup TE": "rejected 501",
       "TE obs-fold": "rejected 501",
-      "xchunked": "rejected 501",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "normalized",
-      "chunk-ext terminator": "normalized",
-      "LF-only terminator": "normalized",
-      "0x-prefixed size": "normalized"
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -88,14 +67,7 @@
       "identity, chunked": "rejected 501",
       "dup TE": "rejected 501",
       "TE obs-fold": "rejected 501",
-      "xchunked": "rejected 501",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "normalized",
-      "chunk-ext terminator": "normalized",
-      "LF-only terminator": "normalized",
-      "0x-prefixed size": "normalized"
+      "xchunked": "rejected 501"
     },
     "reachable": true
   },
@@ -113,14 +85,7 @@
       "identity, chunked": "normalized",
       "dup TE": "normalized",
       "TE obs-fold": "rejected 400",
-      "xchunked": "normalized",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "rejected 400",
-      "chunk-ext terminator": "normalized",
-      "LF-only terminator": "normalized",
-      "0x-prefixed size": "normalized"
+      "xchunked": "normalized"
     },
     "reachable": true
   },
@@ -138,14 +103,7 @@
       "identity, chunked": "rejected 500",
       "dup TE": "rejected 400",
       "TE obs-fold": "rejected 400",
-      "xchunked": "rejected 400",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "rejected 400",
-      "chunk-ext terminator": "stripped",
-      "LF-only terminator": "stripped",
-      "0x-prefixed size": "stripped"
+      "xchunked": "rejected 400"
     },
     "reachable": true
   },
@@ -163,14 +121,7 @@
       "identity, chunked": "rejected 400",
       "dup TE": "rejected 400",
       "TE obs-fold": "rejected 400",
-      "xchunked": "rejected 400",
-      "TE ws-before-colon": "rejected 400",
-      "CL ws-before-colon": "rejected 400",
-      "dup CL": "rejected 400",
-      "bare-LF TE": "rejected 400",
-      "chunk-ext terminator": "rejected 400",
-      "LF-only terminator": "rejected 400",
-      "0x-prefixed size": "rejected 400"
+      "xchunked": "rejected 400"
     },
     "reachable": true
   }

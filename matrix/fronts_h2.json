@@ -1,0 +1,77 @@
+[
+  {
+    "name": "HAProxy 3.2",
+    "id": "haproxy",
+    "reachable": true,
+    "results": {
+      "none (control)": "stripped",
+      "TE chunked": "no-forward",
+      "TE chunked<TAB>": "no-forward",
+      "TE uppercase name": "no-forward",
+      "connection keep-alive": "no-forward",
+      "te chunked": "no-forward",
+      "keep-alive header": "no-forward",
+      "upgrade h2c": "no-forward"
+    }
+  },
+  {
+    "name": "nginx 1.31",
+    "id": "nginx",
+    "reachable": true,
+    "results": {
+      "none (control)": "stripped",
+      "TE chunked": "no-forward",
+      "TE chunked<TAB>": "no-forward",
+      "TE uppercase name": "no-forward",
+      "connection keep-alive": "no-forward",
+      "te chunked": "no-forward",
+      "keep-alive header": "no-forward",
+      "upgrade h2c": "no-forward"
+    }
+  },
+  {
+    "name": "Caddy 2",
+    "id": "caddy",
+    "reachable": true,
+    "results": {
+      "none (control)": "stripped",
+      "TE chunked": "no-forward",
+      "TE chunked<TAB>": "no-forward",
+      "TE uppercase name": "no-forward",
+      "connection keep-alive": "no-forward",
+      "te chunked": "no-forward",
+      "keep-alive header": "no-forward",
+      "upgrade h2c": "no-forward"
+    }
+  },
+  {
+    "name": "Apache httpd 2.4",
+    "id": "httpd",
+    "reachable": true,
+    "results": {
+      "none (control)": "stripped",
+      "TE chunked": "no-forward",
+      "TE chunked<TAB>": "no-forward",
+      "TE uppercase name": "no-forward",
+      "connection keep-alive": "no-forward",
+      "te chunked": "no-forward",
+      "keep-alive header": "no-forward",
+      "upgrade h2c": "no-forward"
+    }
+  },
+  {
+    "name": "Envoy 1.39",
+    "id": "envoy",
+    "reachable": true,
+    "results": {
+      "none (control)": "stripped",
+      "TE chunked": "no-forward",
+      "TE chunked<TAB>": "no-forward",
+      "TE uppercase name": "no-forward",
+      "connection keep-alive": "no-forward",
+      "te chunked": "no-forward",
+      "keep-alive header": "no-forward",
+      "upgrade h2c": "no-forward"
+    }
+  }
+]
