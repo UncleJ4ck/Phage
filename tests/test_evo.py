@@ -1084,6 +1084,82 @@ class TestCveClassGenes(unittest.TestCase):
         # a working one preflights clean
         calibrate(lambda g: Observation(2 if g is pos else 1), pos, neg)
 
+    def test_proxy_oracle_reports_a_desync_only_when_the_backend_saw_more(self):
+        """make_proxy_run_case had no caller and no test, so nothing said whether the
+        oracle worked at all. It fires a genome at a proxy and calls a desync when the
+        backend framed more requests than the proxy answered."""
+        import json
+        import socket
+        import tempfile
+        import threading
+        from pathlib import Path as _P
+
+        from phage.evo.proxy import make_proxy_run_case
+
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        port = srv.getsockname()[1]
+        srv.listen(4)
+
+        def serve(reply, backend_n, log_path):
+            """Answer one request, then append the backend's count the way a real backend
+            does. run_case truncates the log before sending, so the count has to be
+            written during the exchange, not before it."""
+
+            def go():
+                try:
+                    c, _a = srv.accept()
+                except OSError:
+                    return
+                c.recv(65536)
+                _P(log_path).write_text(json.dumps({"n": backend_n}) + "\n")
+                if reply:
+                    c.sendall(reply)
+                c.close()
+
+            t = threading.Thread(target=go, daemon=True)
+            t.start()
+            return t
+
+        one = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+        log = _P(tempfile.mkdtemp(prefix="phage_proxy_")) / "backend.jsonl"
+        try:
+            rc = make_proxy_run_case("127.0.0.1", port, str(log), settle=0.0)
+
+            # backend framed 2, proxy answered 1: the desync signal
+            t = serve(one, 2, log)
+            self.assertEqual(rc(G.seed_post()).request_count, 2)
+            t.join(2)
+
+            # backend framed 1, proxy answered 1: clean
+            t = serve(one, 1, log)
+            self.assertEqual(rc(G.seed_post()).request_count, 1)
+            t.join(2)
+
+            # proxy answered nothing: an error, never a smuggle, even with a high count
+            t = serve(b"", 5, log)
+            obs = rc(G.seed_post())
+            self.assertTrue(obs.error, "a silent proxy must not be scored as a desync")
+            t.join(2)
+        finally:
+            srv.close()
+
+    def test_proxy_oracle_errors_when_it_cannot_connect(self):
+        import socket
+
+        from phage.evo.proxy import make_proxy_run_case
+
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        dead = s.getsockname()[1]
+        s.close()
+        obs = make_proxy_run_case("127.0.0.1", dead, "/nonexistent.jsonl")(
+            G.seed_post()
+        )
+        self.assertTrue(obs.error)
+        self.assertEqual(obs.request_count, 0)
+
     def test_h3_mutators_actually_change_the_genome(self):
         """Each of these four could be replaced by `return list(g)` and the old coverage,
         which only asserted the result was a genome, would stay green. Assert the specific

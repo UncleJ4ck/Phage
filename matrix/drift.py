@@ -43,6 +43,17 @@ SAFE = {"reject", "rejected", "CL-safe", "normalized", "stripped"}
 UNMEASURED = {"no-forward", "no-response", "unknown"}
 
 
+def _publishable(row) -> bool:
+    """Whether this row's verdicts may be compared at all.
+
+    A backend whose pipelining control failed cannot make the counter reach two, and a
+    front nothing reached is describing the harness rather than the proxy. Their cells are
+    still populated, so nothing above notices: the row simply reports SMUGGLE -> CL-safe
+    and drift calls it a FIX. Trust is the gate the matrix already computes; drift has to
+    read it, or the least trustworthy row in the run is the one that looks most improved."""
+    return row.get("trusted") is not False and row.get("reachable") is not False
+
+
 def _kind(verdict: str) -> str:
     """unsafe / safe / unmeasured. An unrecognised verdict is never assumed safe."""
     if verdict in UNSAFE:
@@ -113,9 +124,25 @@ def compare(base, cur):
             continue
         old = pairs[name].get("results", {})
         new = row.get("results", {})
+        publishable = _publishable(row)
         for variant, after in new.items():
             before = old.get(variant)
             if before is None or before == after:
+                continue
+            if not publishable:
+                # the cell moved, but this row is not measuring, so the move is not a
+                # finding in either direction
+                moves.append(
+                    {
+                        "name": name
+                        if pairs[name]["name"] == name
+                        else f"{pairs[name]['name']} -> {name}",
+                        "variant": variant,
+                        "before": before,
+                        "after": after,
+                        "direction": "UNMEASURED",
+                    }
+                )
                 continue
             moves.append(
                 {

@@ -34,3 +34,34 @@ a check that cannot fail is not a check.
       format --check clean, and a full live re-run after every change: 11/11 backends,
       7/7 fronts, all 11 verdicts each, the sozu calibration row still returning four
       FORWARDS-BOTH, and drift clean on both halves. No published verdict moved.
+
+## Follow-up round: what the first pass missed (2026-09-06)
+
+The remediation above was reported as complete. It was not. Re-checking against the
+shipped code rather than against my own summary found two more.
+
+- [x] **A8 drift ignored the trust gate**: audit finding 2 named THREE false-safe paths and
+      the first pass closed two. The third: `drift` never read `trusted` or `reachable`, so
+      a backend whose pipelining control failed between runs still reported
+      `SMUGGLE -> CL-safe` as a FIX and exited 0. That is the most reassuring line in the
+      report, produced by the least trustworthy row in the run.
+      EVIDENCE: reproduced before fixing (direction was FIX, broken was empty). Now
+      UNMEASURED via `_publishable()`. Mutation: ignoring the gate fails the suite. A
+      separate test proves the fix does not suppress a real REGRESSION on a trusted row,
+      which is the way a fix like this usually goes wrong. Zero noise against the real
+      history files, so the permanently-untrusted gunicorn and Werkzeug rows stay quiet.
+- [x] **A9 the proxy oracle was never exercised**: `make_proxy_run_case` had no caller and
+      no test, so nothing said whether it worked. It now has both directions tested against
+      a real socket plus the connect-failure path.
+      EVIDENCE: mutation. Forcing the verdict to always-desync and to never-desync each
+      fail. Its status-line counting carries the same substring flaw fixed in run_matrix,
+      but here it inflates proxy_resp and can only HIDE a desync, never invent one. That
+      direction is documented in the docstring rather than left implicit.
+
+Also corrected: my own orphan sweep reported `is_finding` as uncalled. It is used as a
+default parameter value, which the regex could not see. A false positive from a checker
+written minutes earlier, which is the same trap this project keeps documenting.
+
+Not fixed, and deliberately so: the substring counting inside `proxy.py`. Sharing the
+response-stream walker would mean moving it out of `matrix/` into the installed package, a
+larger change than a fail-safe direction warrants. Written down instead of silently left.

@@ -46,7 +46,14 @@ def make_proxy_run_case(
     """Build a run_case for evolve/search that fires a genome at a reverse proxy
     and returns a desync verdict via backend_requests > proxy_responses. The
     backend must append one JSONL record per connection with an `n` count (see
-    echo_backend). Deterministic: Connection: close kills the pipelining race."""
+    echo_backend). Deterministic: Connection: close kills the pipelining race.
+
+    Known limit, and it is the fail-safe direction. `_STATUS` counts status lines
+    anywhere in the proxy's reply, so a response body that quotes one inflates
+    proxy_resp. Since the verdict is backend_n > proxy_resp, an inflated proxy_resp can
+    only HIDE a desync, never invent one. A missed finding is honest silence; a
+    manufactured one would be a false claim. Tighten this to a real response-stream walk
+    if a target is ever seen echoing status lines."""
 
     def run_case(genome: list) -> Observation:
         raw = _inject_close(render_h1(genome))

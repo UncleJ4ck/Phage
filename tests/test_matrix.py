@@ -253,6 +253,31 @@ class TestDrift(unittest.TestCase):
         _, _, _, broken = drift.compare(base, cur)
         self.assertEqual(broken, [])
 
+    def test_a_row_that_loses_trust_is_not_reporting_a_fix(self):
+        """The third false-safe path, and the one that was missed on the first pass. A
+        backend whose pipelining control fails cannot make the counter reach two, so its
+        "CL-safe" says nothing about the server. Scored naively it reads SMUGGLE -> CL-safe,
+        the most reassuring line in the report, produced by the least trustworthy row."""
+        base = {"B": {"name": "B", "trusted": True, "results": {"v": "SMUGGLE"}}}
+        cur = {"B": {"name": "B", "trusted": False, "results": {"v": "CL-safe"}}}
+        moves, _, _, _ = drift.compare(base, cur)
+        self.assertEqual([m["direction"] for m in moves], ["UNMEASURED"])
+
+    def test_an_unreachable_front_is_not_reporting_a_fix(self):
+        base = {
+            "F": {"name": "F", "reachable": True, "results": {"v": "FORWARDS-BOTH"}}
+        }
+        cur = {"F": {"name": "F", "reachable": False, "results": {"v": "no-forward"}}}
+        moves, _, _, _ = drift.compare(base, cur)
+        self.assertEqual([m["direction"] for m in moves], ["UNMEASURED"])
+
+    def test_the_trust_gate_does_not_suppress_a_real_regression(self):
+        # the failure mode of the fix itself: silencing findings instead of false comfort
+        base = {"B": {"name": "B", "trusted": True, "results": {"v": "reject 400"}}}
+        cur = {"B": {"name": "B", "trusted": True, "results": {"v": "SMUGGLE"}}}
+        moves, _, _, _ = drift.compare(base, cur)
+        self.assertEqual([m["direction"] for m in moves], ["REGRESSION"])
+
     def test_added_and_removed_rows_are_reported(self):
         moves, added, removed, _ = drift.compare(
             {"gone": {"name": "gone", "results": {}}},
