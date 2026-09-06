@@ -400,14 +400,18 @@ the carrier, and counts the responses the backend actually emitted.
 ```
 pair: sozu 2.1.0 (control, known-vulnerable)  ->  Go net/http   variant `chunked<TAB>`
   attack : front forwarded 342B, backend framed 2 response(s)
-  control: front forwarded 333B, backend framed 1 response(s)
+  control: front forwarded 333B (reached backend=True, framing header=False), backend framed 1 response(s)
 PAIR CONFIRMED
 negative control clean
 ```
 
 Every fire is bracketed by the identical carrier with the framing variant removed. If
 the second request survives that, the variant was never the cause and the pair is not
-confirmed. Confirmed 2026-09-06 for all four predicted pairs (sozu 2.1.0 against Go
+confirmed. The control also has to prove it ARRIVED: one response from a request the
+front choked on looks exactly like one response from a request the backend framed
+correctly, and only the first of those is a broken measurement. So the tap is checked
+for a `Content-Length` and the absence of a `Transfer-Encoding` before the control
+counts as clean. Confirmed 2026-09-06 for all four predicted pairs (sozu 2.1.0 against Go
 `net/http`, Hypercorn, Puma and uvicorn `h11`), which is the first end-to-end check of
 the join arithmetic rather than of either half alone.
 

@@ -13,12 +13,12 @@ implementing. A gate whose CHECK cannot fail is not a gate.
 - [x] G2: a predicted pair is fired end to end, and the signal turns off without the payload
   CHECK: .venv/bin/python matrix/fire_pair.py --json /home/j4kuuu/.claude/jobs/478f8714/tmp/fired.json
   EXPECT: PAIR CONFIRMED[\s\S]*negative control clean
-  EVIDENCE: met 2026-09-06. sozu 2.1.0 -> Go net/http on `chunked<TAB>`: backend framed 2 responses, control framed 1. Same result for Hypercorn, Puma and uvicorn h11, 4/4 predicted pairs. matrix/FIRED.json
+  EVIDENCE: met 2026-09-06, re-fired 2026-09-07 after tightening the control. sozu 2.1.0 -> Go net/http on `chunked<TAB>`: backend framed 2 responses, control framed 1. The control now also has to prove it ARRIVED (Content-Length present in the tapped bytes, Transfer-Encoding absent), because one response from a request the front choked on is indistinguishable from one response from a request the backend framed correctly. 4/4 pairs confirmed with arrived=True, te-present=False. matrix/FIRED.json
 
 - [x] G3: the matrix measures framing shapes that are not Transfer-Encoding values
-  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;nonte=[l for l,h,b in VARIANTS if not h.lower().startswith(b'transfer-encoding:') or b is not None];r=json.load(open('matrix/results.json'));meas=all(all(l in row.get('results',{}) for l,_,_ in VARIANTS) for row in r if not row.get('error'));print('NONTE',len(nonte),'MEASURED',meas)"
-  EXPECT: NONTE ([5-9]|[1-9]\d) MEASURED True
-  EVIDENCE: met 2026-09-06. 18 variants across three axes, 7 of them not a Transfer-Encoding value. `bare-LF TE` smuggles on Go net/http, h11 and Hypercorn; `chunk-ext terminator` adds Puma. No front forwards either, so no new pair.
+  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;nonte=[l for l,h,b in VARIANTS if not h.lower().startswith(b'transfer-encoding:') or b is not None];r=json.load(open('matrix/results.json'));smug=sum(1 for row in r if row.get('trusted') for l in nonte if row.get('results',{}).get(l)=='SMUGGLE');print('NONTE',len(nonte),'SMUGGLED',smug)"
+  EXPECT: NONTE ([5-9]|[1-9]\d) SMUGGLED [1-9]
+  EVIDENCE: met 2026-09-06, oracle tightened 2026-09-07. The first CHECK only asserted every label was a key in `results`, which `run` populates unconditionally, so it could not fail. It now counts real SMUGGLE verdicts on the non-TE-value axes across trusted rows: NONTE 7 SMUGGLED 7 (`bare-LF TE` on Go net/http, h11 and Hypercorn; `chunk-ext terminator` on those three plus Puma). Mutation check: swapping the label list for a nonexistent variant gives SMUGGLED 0. No front forwards either axis, so no new pair.
 
 - [x] G4: the evolutionary search has run against a matrix front and backend, calibrated
   CHECK: .venv/bin/python -c "import json;d=json.load(open('/home/j4kuuu/.claude/jobs/478f8714/tmp/evo_matrix.json'));print('TARGET',d['target'],'CALIBRATED',d['calibrated'],'VERDICT',d['verdict'])"

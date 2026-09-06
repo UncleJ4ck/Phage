@@ -186,8 +186,14 @@ def main() -> int:
             "error": err,
         }
         up_c, down_c, err_c = fire(fspec["port"], benign, tap)
+        # One response from the control only means something if the control ARRIVED. A
+        # front that choked on the substituted header would also produce one response,
+        # and the pair would then be "confirmed" against a request the backend never saw.
+        low_c = up_c.lower()
         result["control"] = {
             "forwarded_bytes": len(up_c),
+            "reached_backend": b"\ncontent-length:" in low_c,
+            "carried_framing_header": b"\ntransfer-encoding:" in low_c,
             "backend_responses": _responses(down_c),
             "error": err_c,
         }
@@ -205,12 +211,19 @@ def main() -> int:
         f"backend framed {a['backend_responses']} response(s)"
     )
     print(
-        f"  control: front forwarded {c['forwarded_bytes']}B, "
+        f"  control: front forwarded {c['forwarded_bytes']}B "
+        f"(reached backend={c['reached_backend']}, "
+        f"framing header={c['carried_framing_header']}), "
         f"backend framed {c['backend_responses']} response(s)"
     )
 
     confirmed = a["backend_responses"] >= 2 and not a["error"]
-    clean = c["backend_responses"] == 1 and not c["error"]
+    clean = (
+        c["backend_responses"] == 1
+        and c["reached_backend"]
+        and not c["carried_framing_header"]
+        and not c["error"]
+    )
     result["confirmed"] = confirmed and clean
     Path(args.json).write_text(json.dumps(result, indent=2) + "\n")
 
@@ -218,7 +231,10 @@ def main() -> int:
         print("NOT CONFIRMED: the backend did not frame a second request")
         return 1
     if not clean:
-        print("NOT CONFIRMED: the control also fired, so the variant is not the cause")
+        print(
+            "NOT CONFIRMED: the control did not both arrive and come back clean, so "
+            "the variant has not been shown to be the cause"
+        )
         return 1
     print("PAIR CONFIRMED")
     print("negative control clean")
