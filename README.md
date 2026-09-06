@@ -57,6 +57,9 @@ each](https://cornfield.sh/half-a-vulnerability-each/).
   - [Example 2: Fuzzing with a
     Wordlist](#example-2-fuzzing-with-a-wordlist)
 - [Framing honor matrix](#framing-honor-matrix)
+  - [Two directions, not one](#two-directions-not-one)
+  - [Two more things the population
+    change broke](#two-more-things-the-population-change-broke)
   - [Adding a target](#adding-a-target)
   - [The control gate](#the-control-gate)
   - [Drift](#drift)
@@ -413,6 +416,42 @@ The front half now compares the body it sent against the bytes that arrived and 
 whose carrier declares a `Content-Length` covering only the chunk-size line, so the
 cursor of a `Content-Length`-framing server lands exactly on the hidden request. The
 join reads each variant's direction and labels every predicted pair with it.
+
+Measured 2026-09-07 across 13 backends and 8 fronts: the `TE.CL` column is **empty**. No
+server in the panel ignores a well-formed `Transfer-Encoding`. That zero is worth
+something only because the carrier has a sentinel: strip the `Transfer-Encoding` and a
+`Content-Length`-framing walker frames two requests with the second at `/SMUGGLED`,
+leave it and a `Transfer-Encoding`-framing walker frames one. A column that has never
+been shown to fire is an untested instrument, not a clean result. sozu 2.1.0 does show
+`FORWARDS-BOTH-TE` on `TE.CL chunked<TAB>`, so the front side of that direction is live
+and only the backend side is currently empty.
+
+## Two more things the population change broke
+
+Adding three targets found five defects in the harness and every one had the same shape,
+a verdict asserting more than it measured. Two beyond the ones above:
+
+The front probe hardcoded the default carrier body and ignored the variant's, so the
+three chunk-terminator columns of the published front table were duplicates of the plain
+`chunked` row. They now send their own bodies.
+
+`drift` told the operator a clean run was broken. A row that fails its control is not
+publishable and its cell moves are tagged `UNMEASURED`, which the summary reported as
+"stopped measuring, that is a broken run". A row untrusted in BOTH runs has not stopped
+anything, and Werkzeug has never been trusted. Those moves are `UNTRUSTED` now and do not
+condemn the run. While fixing it, the report loop turned out to iterate a hardcoded list
+of buckets, so twelve moves were counted in the header and never printed; it now asserts
+the list covers every direction the comparison can emit.
+
+One of the five was self-inflicted and is the reason the recording origin looks the way
+it does. Keeping the whole forwarded stream meant appending it when the connection
+closed, which reads correctly and is wrong: a front that keeps its upstream connection
+alive never closes inside the probe's 0.3 second window, so the capture came back empty
+and the row read `no-forward`, the verdict for a proxy that forwarded nothing at all.
+Apache httpd moved on three variants before it was caught. The buffer is published on
+the first byte and extended in place, and the test for it reads inside the origin's idle
+window on purpose: sleeping past it lets the connection close and the broken version
+passes.
 
 ## Three axes, not one
 
