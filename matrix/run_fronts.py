@@ -11,9 +11,15 @@ act on and the back then acts on it. This measures the front half by recording t
 bytes the proxy emits to an origin.
 
 Verdicts per variant:
-  FORWARDS-BOTH  the proxy sent Content-Length AND Transfer-Encoding downstream, having
-                 framed by Content-Length itself. This is the dangerous one: pair it with
-                 any backend that honors the value and you have a desync.
+  FORWARDS-BOTH  the proxy sent both framing headers downstream AND passed the body
+                 through untouched, so it framed by Content-Length. Pair it with a
+                 backend that honors the value and you have a CL.TE desync.
+  FORWARDS-BOTH-TE
+                 it sent both headers but stopped the body at the zero-chunk, so it
+                 framed by Transfer-Encoding. Harmless against a TE-honoring backend
+                 (they agree) and a TE.CL desync against one that frames by
+                 Content-Length. Tomcat is such a backend, which is how this case
+                 stopped being hypothetical.
   normalized     it acted on the Transfer-Encoding (dropped the Content-Length), so front
                  and back agree.
   stripped       it dropped the Transfer-Encoding before forwarding. Safe.
@@ -36,7 +42,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fronts import FRONTS, UPSTREAM_PORT  # noqa: E402
+import run_matrix  # noqa: E402
 from run_matrix import VARIANTS, docker  # noqa: E402
+
 
 CONTAINER = "phage_matrix_front"
 CAPTURED = []
@@ -61,8 +69,19 @@ def origin(stop):
 
 
 def _serve(conn):
+    """Record the WHOLE byte stream the front emitted, then answer.
+
+    This used to keep the head and drop the body, on the reasoning that the body was
+    irrelevant to a header verdict. The body is the only evidence of which framing the
+    proxy ACTED on: a front that passed the chunked bytes through framed by
+    Content-Length, and a front that stopped at the zero-chunk framed by
+    Transfer-Encoding and has already split the carrier into two requests. Both forward
+    the same two headers, and only the first is the CL.TE direction the join assumes.
+    """
     conn.settimeout(3)
+    idle = 0.4
     buf = b""
+    answered = 0
     try:
         while True:
             try:
@@ -72,21 +91,32 @@ def _serve(conn):
             if not d:
                 break
             buf += d
-            while b"\r\n\r\n" in buf:
-                head, _, buf = buf.partition(b"\r\n\r\n")
-                with _lock:
-                    CAPTURED.append(head)
+            conn.settimeout(idle)  # the head is here; drain the rest on a short gap
+            # Answer once per request head seen, so a front waiting on a response is not
+            # deadlocked, but keep every byte for the verdict.
+            heads = buf.count(b"\r\n\r\n")
+            while answered < heads:
                 conn.sendall(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
                     b"Connection: keep-alive\r\n\r\nok"
                 )
-                buf = b""  # body bytes are irrelevant to the header verdict
+                answered += 1
     finally:
+        if buf:
+            with _lock:
+                CAPTURED.append(bytes(buf))
         conn.close()
 
 
-def classify(head, resp):
-    if not head:
+def classify(forwarded, resp, sent_body=b""):
+    """What the proxy emitted to the origin, read from the WHOLE stream it sent.
+
+    `FORWARDS-BOTH` used to be returned on the presence of two headers and its docstring
+    claimed the proxy had "framed by Content-Length itself". That was never measured.
+    Both desync directions forward both headers; they differ in which one the proxy
+    acted on, and the only witness is what it did to the body.
+    """
+    if not forwarded:
         if resp:
             parts = resp.split(b"\r\n", 1)[0].split(b" ")
             # only a real status line; transport errors arrive on their own channel now
@@ -97,11 +127,23 @@ def classify(head, resp):
             ):
                 return f"rejected {parts[1].decode(errors='replace')}"
         return "no-forward"
+    head, _, body = forwarded.partition(b"\r\n\r\n")
     low = head.lower()
     has_te = b"\ntransfer-encoding:" in low
     has_cl = b"\ncontent-length:" in low
     if has_te and has_cl:
-        return "FORWARDS-BOTH"
+        # Which one did it act on? A proxy that framed by Content-Length hands the body
+        # over untouched. A proxy that framed by Transfer-Encoding stops at the
+        # zero-chunk and re-frames what follows, so the bytes we sent are no longer on
+        # the wire in one piece.
+        #
+        # Do NOT decide this by running the stream through parse_requests. That parser
+        # prefers Transfer-Encoding, so it answers what a TE-honoring BACKEND would
+        # frame, which is the question the back half already covers. Here the question
+        # is what the PROXY did, and the only honest witness is the bytes.
+        if not body or not sent_body:
+            return "FORWARDS-BOTH"  # nothing to compare against: direction undetermined
+        return "FORWARDS-BOTH" if sent_body in forwarded else "FORWARDS-BOTH-TE"
     if has_te:
         return "normalized"
     if has_cl:
@@ -109,14 +151,15 @@ def classify(head, resp):
     return "unknown"
 
 
-def probe(port, hdr):
-    body = b"0\r\n\r\nGET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
-    head_line = b"POST /carrier HTTP/1.1\r\nHost: lab\r\nContent-Length: %d\r\n" % len(
-        body
-    )
-    if hdr:
-        head_line += hdr + b"\r\n"
-    req = head_line + b"\r\n" + body
+def probe(port, hdr, sent_body=None, content_length=None):
+    """Fire one carrier at the front. Returns (forwarded_stream, response, error).
+
+    The carrier is built by run_matrix.build so both halves send the same bytes. This
+    used to hardcode the default body and ignore the variant's, which silently turned
+    every chunk-terminator variant into a duplicate of the plain `chunked` row on the
+    front side: three columns of the published table were measuring one thing.
+    """
+    req = run_matrix.build(hdr, sent_body, content_length)
     with _lock:
         CAPTURED.clear()
     try:
@@ -204,11 +247,12 @@ def run(spec):
         row["reachable"] = bool(ctl)
         if not row["reachable"]:
             print("    CONTROL FAILED: nothing reached the origin, verdicts untrusted")
-        for label, hdr, _body in VARIANTS:
-            h, resp, err = probe(spec["port"], hdr)
-            verdict = classify(h, resp) if not err else f"error: {err}"
-            row["results"][label] = verdict
-            print(f"    {label:20} {verdict}", flush=True)
+        for v in VARIANTS:
+            sent = run_matrix.DEFAULT_BODY if v.body is None else v.body
+            fwd, resp, err = probe(spec["port"], v.header, v.body, v.content_length)
+            verdict = classify(fwd, resp, sent) if not err else f"error: {err}"
+            row["results"][v.label] = verdict
+            print(f"    {v.label:20} {verdict}", flush=True)
     finally:
         docker("rm", "-f", CONTAINER)
         shutil.rmtree(cfgdir, ignore_errors=True)

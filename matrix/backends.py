@@ -191,4 +191,43 @@ async fn main(){
 EOF
 cargo run --release -q""",
     },
+    {
+        # The JVM servers were the largest hole in this table: three parsers with a long
+        # smuggling history and none of them measured. Each needs a webapp to answer 200
+        # on an arbitrary path, because a bare install 404s and classify() would read that
+        # as a refusal of the framing rather than a missing route.
+        "name": "Tomcat 11",
+        "parser": "coyote",
+        "image": "tomcat:11-jre21",
+        "port": 9412,
+        "boot": 90,
+        "app": r"""sed -i 's|port="8080"|port="9412" address="127.0.0.1"|' conf/server.xml
+mkdir -p webapps/ROOT/WEB-INF
+printf ok > webapps/ROOT/ok.jsp
+cat > webapps/ROOT/WEB-INF/web.xml <<'XML'
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee" version="6.0">
+ <servlet><servlet-name>ok</servlet-name><jsp-file>/ok.jsp</jsp-file></servlet>
+ <servlet-mapping><servlet-name>ok</servlet-name><url-pattern>/*</url-pattern></servlet-mapping>
+</web-app>
+XML
+catalina.sh run""",
+    },
+    {
+        "name": "Jetty 12",
+        "parser": "jetty (HttpParser)",
+        "image": "jetty:12-jre21",
+        "port": 9413,
+        "boot": 90,
+        "app": r"""mkdir -p /tmp/jb && cd /tmp/jb
+java -jar $JETTY_HOME/start.jar --add-modules=server,http,ee10-deploy,ee10-jsp   --approve-all-licenses >/dev/null 2>&1
+mkdir -p webapps/ROOT/WEB-INF
+printf ok > webapps/ROOT/ok.jsp
+cat > webapps/ROOT/WEB-INF/web.xml <<'XML'
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee" version="6.0">
+ <servlet><servlet-name>ok</servlet-name><jsp-file>/ok.jsp</jsp-file></servlet>
+ <servlet-mapping><servlet-name>ok</servlet-name><url-pattern>/*</url-pattern></servlet-mapping>
+</web-app>
+XML
+exec java -jar $JETTY_HOME/start.jar jetty.http.port=9413 jetty.http.host=127.0.0.1""",
+    },
 ]

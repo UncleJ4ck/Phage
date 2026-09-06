@@ -373,6 +373,47 @@ python matrix/fire_pair.py      # confirm    -> matrix/FIRED.json
 python matrix/run_fronts_h2.py  # h2 half    -> matrix/fronts_h2.json
 ```
 
+## Two directions, not one
+
+A desync is two parsers disagreeing, and there are two ways to disagree. The table
+measured one of them for its whole life.
+
+- **CL.TE**: the front frames by `Content-Length` and forwards a `Transfer-Encoding` it
+  did not act on; the back honors that value. The back sees an extra request.
+- **TE.CL**: the front frames by `Transfer-Encoding`; the back ignores it and frames by
+  `Content-Length` instead. Same two headers on the wire, opposite disagreement.
+
+Both halves used to be blind to the second one. The front verdict `FORWARDS-BOTH` was
+returned on the presence of two headers while its own docstring claimed the proxy had
+"framed by Content-Length itself", which was never measured; the recording origin threw
+the body away with the comment that it was irrelevant to a header verdict, and the body
+is the only witness to which framing the proxy acted on. The join then hardcoded the
+CL.TE direction. So a proxy that de-chunked and forwarded both headers was reported as
+CL.TE-dangerous (a false positive against a TE-honoring backend) and could never be
+paired with a `Content-Length`-framing backend (a false negative).
+
+No backend in the population has yet been shown to frame by `Content-Length` when both
+headers are present, so the TE.CL column is currently empty. That column existing is
+still the point: the table could not previously have reported such a backend at all.
+
+Tomcat is worth the paragraph anyway, because chasing it found a third verdict that
+asserted more than it measured. Tomcat honors a lone `Transfer-Encoding` (a zero-chunk
+carrier frames two requests) and pipelines happily (a short `Content-Length` with a
+whole request behind it frames three). When BOTH framing headers arrive it answers once
+and sends `Connection: close`. The old vocabulary called that `CL-safe`, which reads as
+"framed by Content-Length" and is not what happened: the server refused to keep the
+connection, so the counter could never have reached two on that row whatever the
+framing. That is now its own verdict, `closed`, and it is a different security posture
+too: a `Content-Length`-framing server is safe against CL.TE and exposed to TE.CL, while
+a server that hangs up leaves no pooled connection to poison either way. Jetty answers
+`400` to the same request, which is what RFC 9112 section 6.1 asks for.
+
+The front half now compares the body it sent against the bytes that arrived and reports
+`FORWARDS-BOTH` or `FORWARDS-BOTH-TE`. The back half carries a `TE.CL` variant family
+whose carrier declares a `Content-Length` covering only the chunk-size line, so the
+cursor of a `Content-Length`-framing server lands exactly on the hidden request. The
+join reads each variant's direction and labels every predicted pair with it.
+
 ## Three axes, not one
 
 The variant list started as eleven spellings of `chunked`, which measures the value

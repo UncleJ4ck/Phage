@@ -182,4 +182,30 @@ ProxyPassReverse / http://127.0.0.1:{up}/
         - endpoint: {{ address: {{ socket_address: {{ address: 127.0.0.1, port_value: {up} }} }} }}
 """,
     },
+    {
+        # The only CACHE in this population, which is the position where a desync stops
+        # being a desync and becomes cache poisoning. Its parser is hand-written and
+        # shared with nothing else here, so it is an independent measurement rather than
+        # another view of nginx. `pass` keeps it comparable to the non-caching rows: what
+        # a proxy forwards on a miss is the same question the others are answering.
+        "name": "Varnish 7.6",
+        "id": "varnish",
+        "image": "varnish:7.6",
+        "port": 9488,
+        "config_path": "/etc/varnish/default.vcl",
+        "args": [
+            "varnishd",
+            "-F",
+            "-a",
+            "127.0.0.1:9488",
+            "-f",
+            "/etc/varnish/default.vcl",
+            "-s",
+            "malloc,64m",
+        ],
+        "config": """vcl 4.1;
+backend default {{ .host = "127.0.0.1"; .port = "{up}"; }}
+sub vcl_recv {{ return (pass); }}
+""",
+    },
 ]

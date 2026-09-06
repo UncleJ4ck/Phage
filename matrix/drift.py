@@ -39,7 +39,11 @@ UNSAFE = {"SMUGGLE", "FORWARDS-BOTH"}
 # crashed calibration row reads as four security FIXes and the run exits 0.
 # Both spellings on purpose: the backend harness emits "reject 400" and the front
 # harness "rejected 400". They are separate vocabularies and both are real refusals.
-SAFE = {"reject", "rejected", "CL-safe", "normalized", "stripped"}
+# "closed" is safe by unreachability rather than by framing: the server answered once
+# and hung up, so there is no pooled connection left to smuggle into. It is still a
+# distinct fact from CL-safe, which is why it is a separate verdict, but a move from one
+# to the other is not a parser getting more lenient and must not exit 1.
+SAFE = {"reject", "rejected", "CL-safe", "closed", "normalized", "stripped"}
 UNMEASURED = {"no-forward", "no-response", "unknown"}
 
 
@@ -125,13 +129,18 @@ def compare(base, cur):
         old = pairs[name].get("results", {})
         new = row.get("results", {})
         publishable = _publishable(row)
+        was_publishable = _publishable(pairs[name])
         for variant, after in new.items():
             before = old.get(variant)
             if before is None or before == after:
                 continue
             if not publishable:
-                # the cell moved, but this row is not measuring, so the move is not a
-                # finding in either direction
+                # The cell moved but this row is not measuring, so the move is not a
+                # finding in either direction. WHEN it stopped matters, though: a row
+                # that was publishable last run and is not now means this run broke, and
+                # a row that was already untrusted means nothing changed. Reporting both
+                # as "stopped measuring" told the operator to distrust a clean run
+                # because a row that has never measured moved a cell.
                 moves.append(
                     {
                         "name": name
@@ -140,7 +149,7 @@ def compare(base, cur):
                         "variant": variant,
                         "before": before,
                         "after": after,
-                        "direction": "UNMEASURED",
+                        "direction": "UNMEASURED" if was_publishable else "UNTRUSTED",
                     }
                 )
                 continue
@@ -206,7 +215,11 @@ def main():
         return 0
 
     print(f"\n{len(moves)} verdict(s) moved:\n")
-    for kind in ("REGRESSION", "UNMEASURED", "FIX", "NEUTRAL"):
+    # every bucket a move can land in has to be listed here, or a move is counted in the
+    # header and then never printed
+    order = ("REGRESSION", "UNMEASURED", "FIX", "NEUTRAL", "UNTRUSTED")
+    assert set(order) >= {m["direction"] for m in moves}, "unprinted move direction"
+    for kind in order:
         rows = [m for m in moves if m["direction"] == kind]
         if not rows:
             continue

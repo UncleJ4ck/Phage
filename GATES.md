@@ -29,3 +29,18 @@ implementing. A gate whose CHECK cannot fail is not a gate.
   CHECK: .venv/bin/python -c "import json;r=json.load(open('matrix/fronts_h2.json'));print('H2FRONTS',len(r),'REACHABLE',len([x for x in r if x.get('reachable')]))"
   EXPECT: H2FRONTS [1-9]\d* REACHABLE [1-9]\d*
   EVIDENCE: met 2026-09-06. 5 fronts reachable over h2c. Control forwards (stripped, so the channel is proven), and every HTTP/2-forbidden framing header is refused outright by all five. No front mints an HTTP/1 Transfer-Encoding from h2. matrix/fronts_h2.json
+
+- [ ] G6: the front verdict measures which framing the proxy ACTED on, not which headers it forwarded
+  CHECK: PYTHONPATH=src .venv/bin/python -m unittest tests.test_matrix.TestFrontFramingDirection 2>&1 | tail -3 | tr '\n' '~'
+  EXPECT: Ran ([1-9]\d*) tests[^~]*~-+~OK~
+  EVIDENCE: pending
+
+- [ ] G7: the back half measures the TE.CL direction, not only CL.TE
+  CHECK: .venv/bin/python -c "import sys,json;sys.path.insert(0,'matrix');from run_matrix import VARIANTS;tecl=[v.label for v in VARIANTS if v.direction=='TE.CL'];r=json.load(open('matrix/results.json'));hits=sum(1 for row in r if row.get('trusted') for l in tecl if row.get('results',{}).get(l)=='SMUGGLE');print('TECL',len(tecl),'FRAMED_BY_CL',hits)"
+  EXPECT: TECL [1-9]\d* FRAMED_BY_CL [1-9]
+  EVIDENCE: pending
+
+- [ ] G8: the join predicts both directions and labels which
+  CHECK: .venv/bin/python matrix/pairs.py --fronts matrix/fronts.json --backs matrix/results.json --md /dev/null 2>&1 | grep -cE "CL\.TE|TE\.CL"
+  EXPECT: ^[1-9]
+  EVIDENCE: pending

