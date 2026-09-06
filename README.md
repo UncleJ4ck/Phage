@@ -61,6 +61,9 @@ each](https://cornfield.sh/half-a-vulnerability-each/).
   - [The control gate](#the-control-gate)
   - [Drift](#drift)
 - [Evolutionary desync search](#evolutionary-desync-search)
+  - [Two preflights](#two-preflights)
+  - [What the origin oracle can and cannot
+    see](#what-the-origin-oracle-can-and-cannot-see)
 - [Research](#research)
 - [Contributing](#contributing)
 - [Limitations](#limitations)
@@ -385,9 +388,16 @@ worth an advisory. `FIX` is the reverse. `NEUTRAL` is a move that does not cross
 safe/unsafe line, such as a changed reject code. It exits 1 on any regression, so a scheduled
 run can gate on it. Keep each run under `matrix/history/` to have something to diff against.
 
-The two measurement scripts take `--only <substring>` to run a subset;
-`pairs.py` just joins the JSON the other two wrote. Every backend and front runs
-as a container bound to loopback.
+The two measurement scripts take `--only <substring>` to run a subset, and
+`run_matrix.py` takes `--jobs N` to measure N backends at once, each on its own port
+(11 backends: 268s serial, 91s at `--jobs 4`, byte-identical verdicts). `pairs.py`
+just joins the JSON the other two wrote. Every backend and front runs as a container
+bound to loopback.
+
+Both harnesses and the evolutionary oracle read HTTP/1 responses through one parser,
+`phage.evo.http1`. It walks the response stream rather than counting occurrences of
+`HTTP/1.1 `, so a body that quotes a status line does not become a phantom second
+response and a `1xx` interim does not become a framed request.
 
 ## Adding a target
 
@@ -427,13 +437,65 @@ refuse to send, actually reaches the wire. A saved hit replays with
 `--replay poc.json`. Labs are under `lab_*/`; they are local-only and bind to
 loopback.
 
+## Two preflights
+
+```bash
+python -m phage.evo ... --calibrate --stabilize 3
+```
+
+`--calibrate` fires a known-positive and a known-negative through the oracle before
+the search starts, and aborts unless it can tell them apart. A search cannot find
+what its oracle cannot detect, and a clean sweep from an instrument that has never
+produced a positive is not evidence of absence.
+
+`--stabilize N` re-fires every flagged genome N times and demotes anything that does
+not reproduce. A signal you cannot turn on again on demand is noise, not a finding.
+
+The known-positive is the standalone FIN, and it needs an origin that keeps its
+connection open. Against `lab/` the preflight will abort, which is the gate being
+right rather than a bug: see below.
+
+## What the origin oracle can and cannot see
+
+The ground-truth backend counts the requests the origin framed on one connection, so
+it catches any desync that lands as an extra request in the same burst. It does not
+catch a desync that only shows up on the NEXT request through the pool, because it
+closes the connection after each burst.
+
+CVE-2026-33555 is that second shape. The proxy forwards a `Content-Length` it never
+fills, the request count stays at one, and the victim is eaten only when a pooled
+backend connection is reused. `lab_h3cve/conn_bk.py` holds its connections open and
+logs a request line per framed request, which is why the poisoning is visible there
+and not in `lab/`.
+
+The origin now records the body it actually received (`short` in the JSONL) next to
+the count, because it used to record the DECLARED `Content-Length` and call it the
+body length, which made a truncated request byte-identical in the log to a
+well-formed one. That number is deliberately not part of the verdict. Measured
+2026-09-06 against HAProxy 3.0.18 and 3.0.26, three runs each: a standalone FIN under
+`Content-Length: 10` arrives at the origin as one request short by ten bytes on
+**both** builds, because HAProxy streams the head through before it decides to abort
+the request (`CH--` / `CD--` in its log, and a `400` when the framing is malformed).
+A detector built on that number calls every build vulnerable. It is kept for triage
+and kept out of the vote.
+
+Closing this properly needs a boundary-aware oracle rather than a count-aware one:
+on a poisoned pool the victim's request line arrives truncated, and that is content,
+not arithmetic. `classify` compares counts on purpose today.
+
 ---
 
 # Research
 
 - **CVE-2026-33555**, HAProxy HTTP/3 to HTTP/1 standalone-FIN desync. Fixed in
   HAProxy 3.0.19. The `Fin` gene is that primitive, and the lab under
-  `lab_h3cve/` reproduces it with a negative control.
+  `lab_h3cve/` reproduces it: on 3.0.10 the edge forwards `Content-Length: 10` with
+  no body, and the next request through the pooled backend connection loses exactly
+  its first ten bytes (`REQ M_MARKER_ZZZZ HTTP/1.1` where the victim sent
+  `GET /VICTIM_MARKER_ZZZZ`). Re-verified 2026-09-06.
+  Note that 3.0.10 is built `USE_QUIC_OPENSSL_COMPAT` against stock OpenSSL, so it
+  needs `limited-quic` and it truncates every body, positive and negative alike;
+  3.0.15 onward link AWS-LC and speak QUIC natively.
 - **sozu / kawa `Transfer-Encoding` smuggling**, a regression of
   [sozu#726](https://github.com/sozu-proxy/sozu/issues/726). kawa 0.6.8 selected
   chunked framing with a suffix-only compare and no OWS trim, so

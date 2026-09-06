@@ -2,7 +2,11 @@
 # License: Apache-2.0 License
 
 """Parses the bytes the proxy forwarded and reports the request boundaries seen.
-A smuggled request shows up as a higher count. parse_requests is pure."""
+
+Two signals, because one is not enough. A smuggled request shows up as a higher
+COUNT. A body the proxy promised and never delivered shows up as a SHORTFALL, and
+leaves the count at one: that is the H3 standalone-FIN family, invisible to counting.
+parse_requests is pure."""
 
 import json
 import os
@@ -17,10 +21,14 @@ from typing import List, Optional, Tuple
 class ParsedRequest:
     method: bytes
     path: bytes
-    body_len: int
+    body_len: int  # bytes that ARRIVED
+    declared: int = 0  # what Content-Length promised; > body_len means truncated
 
     def boundary(self) -> Tuple[bytes, bytes, int]:
         return (self.method, self.path, self.body_len)
+
+    def short(self) -> int:
+        return max(0, self.declared - self.body_len)
 
 
 def _consume_chunked(raw: bytes, i: int) -> Tuple[int, int]:
@@ -89,10 +97,21 @@ def parse_requests(
         body_start = hdr_end + 4
         if chunked:
             i, body_len = _consume_chunked(raw, body_start)
+            declared = body_len
         else:
-            body_len = cl
+            declared = cl
+            # What ARRIVED, not what the header claimed. A proxy that forwards
+            # `Content-Length: N` and then fewer than N body bytes has told the origin
+            # to expect bytes it never sent, and that gap is the pool-poisoning
+            # primitive itself: the origin drains the next request's first N bytes as
+            # the missing body. Recording the DECLARED value here made that shape
+            # byte-identical in the log to a well-formed request, so the live oracle
+            # was structurally blind to the bug class this tool exists to find.
+            # The cursor still advances by the declared length: the request COUNT is a
+            # separate signal and must not move.
+            body_len = max(0, min(cl, n - body_start))
             i = body_start + cl
-        out.append(ParsedRequest(method, path, body_len))
+        out.append(ParsedRequest(method, path, body_len, declared))
     return out
 
 
@@ -184,7 +203,11 @@ class EchoBackend(socketserver.ThreadingTCPServer):
         if not self.log_path:
             return
         line = json.dumps(
-            {"n": len(reqs), "boundaries": [list(r.boundary()) for r in reqs]},
+            {
+                "n": len(reqs),
+                "short": sum(r.short() for r in reqs),
+                "boundaries": [list(r.boundary()) for r in reqs],
+            },
             default=lambda b: b.decode("latin-1"),
         )
         with self._lock, open(self.log_path, "a", encoding="utf-8") as f:

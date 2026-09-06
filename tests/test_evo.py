@@ -33,6 +33,7 @@ from phage.evo.evolve import (
 )
 from phage.evo.stigmergy import StigmergyMutator
 from phage.evo.minimize import ddmin
+from phage.evo.gates import is_finding
 from phage.evo.oracle import Observation, Verdict, classify
 from phage.evo.runner import (
     _latency_bucket,
@@ -2522,6 +2523,68 @@ class TestChainOracle(unittest.TestCase):
 
         rc = stabilized(make_chain_run_case(chain_probe, [lambda raw: (1, 1)]), n=3)
         self.assertEqual(rc(self._g()).request_count, 1)  # not reproducible -> demoted
+
+
+class TestShortBody(unittest.TestCase):
+    """The origin now reports the body it RECEIVED, not the one the header promised.
+
+    It is recorded and never voted on. See the oracle docstring: a short body looks
+    the same at the origin whether the proxy desynced or correctly rejected the
+    request, so the verdict stays count-based."""
+
+    def test_body_len_is_what_arrived_not_what_was_declared(self):
+        reqs = parse_requests(b"POST /evil HTTP/1.1\r\nContent-Length: 10\r\n\r\n")
+        self.assertEqual(len(reqs), 1)  # count is unchanged, that is the point
+        self.assertEqual(reqs[0].body_len, 0)
+        self.assertEqual(reqs[0].declared, 10)
+        self.assertEqual(reqs[0].short(), 10)
+
+    def test_a_partial_body_reports_only_the_missing_bytes(self):
+        reqs = parse_requests(b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nAAA")
+        self.assertEqual(reqs[0].body_len, 3)
+        self.assertEqual(reqs[0].short(), 7)
+
+    def test_a_complete_body_is_never_short(self):
+        reqs = parse_requests(b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nAAAA")
+        self.assertEqual(reqs[0].body_len, 4)
+        self.assertEqual(reqs[0].short(), 0)
+
+    def test_a_chunked_body_is_never_short(self):
+        raw = b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nAAAA\r\n0\r\n\r\n"
+        self.assertEqual(parse_requests(raw)[0].short(), 0)
+
+    def test_a_pipelined_pair_is_not_short(self):
+        # The second request's bytes must not be mistaken for the first one's body.
+        raw = b"GET /a HTTP/1.1\r\nHost: x\r\n\r\nGET /b HTTP/1.1\r\nHost: x\r\n\r\n"
+        self.assertEqual(sum(r.short() for r in parse_requests(raw)), 0)
+
+    def test_the_backend_writes_the_shortfall_to_the_oracle_log(self):
+        import json
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".jsonl") as f:
+            server = EchoBackend("127.0.0.1", 0, log_path=f.name).start()
+            try:
+                port = server.server_address[1]
+                with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
+                    s.sendall(b"POST /evil HTTP/1.1\r\nContent-Length: 10\r\n\r\n")
+                    s.recv(4096)
+                with open(f.name) as log:
+                    rec = json.loads(log.read().splitlines()[-1])
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertEqual(rec["n"], 1)
+        self.assertEqual(rec["short"], 10)
+
+    def test_a_short_body_alone_does_not_move_the_verdict(self):
+        # HAProxy 3.0.18 answers a malformed CL 400 CH-- and the origin still sees a
+        # short body. Voting on it would publish a correct rejection as a desync.
+        base = Observation(1)
+        self.assertEqual(
+            classify(1, base, Observation(1, short_body=10)), Verdict.CLEAN
+        )
+        self.assertFalse(is_finding(Observation(1, short_body=10)))
 
 
 if __name__ == "__main__":

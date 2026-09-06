@@ -286,7 +286,8 @@ def _live_run_case(
             return Observation(0, error=True, latency=latency)
         total = sum(r.get("n", 0) for r in recs)
         boundaries = tuple(tuple(b) for r in recs for b in r.get("boundaries", []))
-        return Observation(total, boundaries, latency=latency)
+        short = sum(r.get("short", 0) for r in recs)
+        return Observation(total, boundaries, latency=latency, short_body=short)
 
     return run_case
 
@@ -464,7 +465,8 @@ def main() -> int:
         genome, meta, obs = replay(run_case, args.replay)
         verdict = classify(args.streams, None, obs)
         print(
-            f"replay {args.replay}: backend n={obs.request_count} -> {verdict.value} (meta={meta})"
+            f"replay {args.replay}: backend n={obs.request_count} "
+            f"short={obs.short_body} -> {verdict.value} (meta={meta})"
         )
         return 0 if verdict in FINDINGS else 1
 

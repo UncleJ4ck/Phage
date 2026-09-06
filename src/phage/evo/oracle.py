@@ -1,7 +1,18 @@
 # Phage: differential desync oracle.
 # License: Apache-2.0 License
 
-"""Count-based desync verdict from echo-backend ground truth."""
+"""Count-based desync verdict from echo-backend ground truth.
+
+`short_body` is recorded but deliberately does NOT move the verdict. A body the
+proxy declared and never delivered looks identical at the origin whether the proxy
+desynced or correctly rejected a malformed request and tore the exchange down.
+Measured 2026-09-06 on HAProxy 3.0.18: the real standalone-FIN CVE and a
+`Content-Length: 3` carrying a 36-byte DATA frame (which HAProxy answers `400 CH--`,
+doing its job) both reach the origin as one request with a short body, and in both
+the proxy then closes the backend connection. No origin-side signal separates them.
+Telling them apart needs the CROSS-REQUEST observation this backend cannot make: it
+closes after one burst, so it never sees a pooled connection being reused. Keep the
+field for triage, keep it out of the verdict."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -25,6 +36,7 @@ class Observation:
     error: bool = False
     crashed: bool = False  # the proxy became unreachable (potential DoS)
     latency: float = 0.0  # round-trip seconds, a response-side signal
+    short_body: int = 0  # bytes the proxy declared to the origin and never sent
 
 
 def classify(
